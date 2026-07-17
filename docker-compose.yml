@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: hunter_order
+      POSTGRES_USER: hunter_order
+      POSTGRES_PASSWORD: hunter_order_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - hunter_order_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hunter_order -d hunter_order"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hunter_order_postgres:

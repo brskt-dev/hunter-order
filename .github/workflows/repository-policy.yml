@@ -1,0 +1,29 @@
+name: Repository policy
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required governance files
+        shell: bash
+        run: |
+          test -f CLAUDE.md
+          test -f docs/agent/autonomy-policy.md
+          test -f docs/agent/definition-of-done.md
+          test -f docs/technical/architecture.md
+      - name: Reject placeholder secrets
+        shell: bash
+        run: |
+          if git grep -nE '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16})'; then
+            echo "Potential secret material found."
+            exit 1
+          fi

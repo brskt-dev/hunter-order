@@ -1,0 +1,27 @@
+name: Human decision
+description: Record a product or architecture decision required by autonomous work
+title: "[Decision] "
+labels: ["decision:required"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and tradeoffs
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Agent recommendation
+    validations:
+      required: true
+  - type: textarea
+    id: blocked
+    attributes:
+      label: Work blocked by this decision

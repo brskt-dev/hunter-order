@@ -1,0 +1,38 @@
+name: Nightly agent task
+description: Define a bounded autonomous implementation task
+title: "[Nightly] "
+labels: ["agent:nightly", "status:ready"]
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Describe the concrete player or developer outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: Player experience
+      description: What should a player perceive or be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List included and excluded work.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: Use objectively demonstrable criteria.
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Human-only decisions
+      description: List decisions the agent must not make.
