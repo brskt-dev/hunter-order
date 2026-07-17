@@ -1,7 +1,4 @@
-import Phaser from 'phaser';
-import { createGameConfig } from './game/config';
+import { createGame } from '@app';
 
-// Single entry point: build the Phaser game bound to the responsive container.
-const game = new Phaser.Game(createGameConfig('game-root'));
-
-export default game;
+// Application entry point. All wiring lives in the app/bootstrap layer.
+createGame('game-root');
