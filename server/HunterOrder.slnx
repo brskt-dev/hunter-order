@@ -1,0 +1,48 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HunterOrder.Api/HunterOrder.Api.csproj" />
+    <Project Path="src/HunterOrder.Bootstrap/HunterOrder.Bootstrap.csproj" />
+    <Project Path="src/HunterOrder.SharedKernel/HunterOrder.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Accounts/">
+    <Project Path="src/Modules/Accounts/HunterOrder.Modules.Accounts.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Administration/">
+    <Project Path="src/Modules/Administration/HunterOrder.Modules.Administration.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Characters/">
+    <Project Path="src/Modules/Characters/HunterOrder.Modules.Characters.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Chat/">
+    <Project Path="src/Modules/Chat/HunterOrder.Modules.Chat.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Clans/">
+    <Project Path="src/Modules/Clans/HunterOrder.Modules.Clans.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Combat/">
+    <Project Path="src/Modules/Combat/HunterOrder.Modules.Combat.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Gathering/">
+    <Project Path="src/Modules/Gathering/HunterOrder.Modules.Gathering.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Identity/">
+    <Project Path="src/Modules/Identity/HunterOrder.Modules.Identity.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Inventory/">
+    <Project Path="src/Modules/Inventory/HunterOrder.Modules.Inventory.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Movement/">
+    <Project Path="src/Modules/Movement/HunterOrder.Modules.Movement.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Simulation/">
+    <Project Path="src/Modules/Simulation/HunterOrder.Modules.Simulation.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/World/">
+    <Project Path="src/Modules/World/HunterOrder.Modules.World.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HunterOrder.IntegrationTests/HunterOrder.IntegrationTests.csproj" />
+    <Project Path="tests/HunterOrder.UnitTests/HunterOrder.UnitTests.csproj" />
+  </Folder>
+</Solution>
