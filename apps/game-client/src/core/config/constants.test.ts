@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BACKGROUND_COLOR, GAME_HEIGHT, GAME_WIDTH } from './constants';
+
+import { COLORS, GAME_HEIGHT, GAME_WIDTH } from './constants';
 
 describe('game constants', () => {
   it('defines a positive base resolution', () => {
@@ -11,7 +12,9 @@ describe('game constants', () => {
     expect(GAME_WIDTH / GAME_HEIGHT).toBeCloseTo(16 / 9);
   });
 
-  it('defines the background as a hex color', () => {
-    expect(BACKGROUND_COLOR).toMatch(/^#[0-9a-fA-F]{6}$/);
+  it('defines colors as hex values', () => {
+    for (const value of Object.values(COLORS)) {
+      expect(value).toMatch(/^#[0-9a-fA-F]{6}$/);
+    }
   });
 });

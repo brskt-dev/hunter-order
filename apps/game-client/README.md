@@ -1,8 +1,9 @@
 # @hunter-order/game-client
 
-Browser game client for Hunter Order. This package currently contains only the
-technical foundation: the rendering stack and a minimal boot screen. No gameplay,
-player, map, camera, networking, HUD or assets are implemented yet.
+Browser game client for Hunter Order. This package contains the **client
+infrastructure** — the rendering stack, application architecture and a minimal
+boot screen. No gameplay, player, map, camera, networking, HUD or assets are
+implemented yet.
 
 ## Stack
 
@@ -13,56 +14,60 @@ player, map, camera, networking, HUD or assets are implemented yet.
 | Bundler / dev | [Vite](https://vitejs.dev/)                        |
 | Unit tests    | [Vitest](https://vitest.dev/) (node environment)   |
 | Linting       | ESLint 9 flat config + `typescript-eslint`         |
+| Import order  | `eslint-plugin-simple-import-sort`                 |
+| Path aliases  | tsconfig `paths` + `vite-tsconfig-paths`           |
 | Formatting    | Prettier 3 (`eslint-config-prettier` avoids clash) |
 
 React (planned in `docs/technical/architecture.md` for UI overlays) is
-intentionally **not** installed yet — it will be added when the first HUD/overlay
-slice is scoped.
+intentionally **not** installed yet — it will be added with the first HUD/overlay
+slice.
 
-## Project structure
+## Architecture
+
+Full write-up: [`docs/technical/client-architecture.md`](../../docs/technical/client-architecture.md).
+
+Layered, dependencies point downward: `scenes → app → core → shared`. A single
+`GameContext` (env, logger, event bus, service registry) is built at bootstrap
+and injected into Phaser so every `BaseScene` can reach it.
 
 ```text
-apps/game-client/
-  index.html              Vite entry document; hosts the #game-root canvas container
-  vite.config.ts          Vite + Vitest configuration
-  tsconfig.json           TypeScript compiler options (strict, noEmit)
-  eslint.config.js        Flat ESLint configuration
-  .prettierrc.json        Prettier options
-  src/
-    main.ts               Entry point: creates the Phaser.Game instance
-    vite-env.d.ts         Vite client type references (import.meta.env)
-    game/
-      constants.ts        Phaser-free game constants (unit-tested)
-      constants.test.ts   Unit tests for the game constants
-      config.ts           createGameConfig() factory (Phaser glue)
-      scenes/
-        BootScene.ts      Boot screen: title + dev-only FPS counter
+src/
+  main.ts                 Entry point → createGame('game-root')
+  app/
+    bootstrap.ts          createGame(): builds context + Phaser game
+    game-config.ts        Phaser GameConfig (+ injects context via preBoot)
+  core/
+    config/               constants, env (typed import.meta.env)
+    logger/               scoped, level-gated logger
+    events/               typed EventBus + GameEventMap
+    services/             Service contract + ServiceRegistry
+    context/              GameContext + createGameContext (composition root)
+    scenes/               BaseScene, SceneKeys
+  scenes/
+    boot-scene.ts         Boot screen (title + dev FPS); reference BaseScene usage
+    index.ts              sceneClasses registry
+  shared/utils/           assert / assertDefined
+  assets/                 bundled asset organization (see assets/README.md)
 ```
 
-## Testing note
-
-Unit tests run in a plain Node environment and deliberately avoid importing the
-Phaser runtime, which performs canvas/WebGL feature detection at import time and
-is impractical to load headlessly without native dependencies. Phaser-derived
-values are therefore isolated in `constants.ts` and tested there; `config.ts` and
-`BootScene.ts` are verified by the production build and by running the client.
-When DOM/scene-level tests are needed, add a browser-like environment (e.g.
-jsdom) plus a canvas stub at that time.
+Path aliases: `@app`, `@core/*`, `@scenes`, `@shared/*`, `@assets/*`, `@/*`.
 
 ## Boot screen
 
-`BootScene` renders:
+`BootScene` renders a solid background (`#0d0f14`), a centered "Hunter Order"
+title, a dev-only FPS counter (`import.meta.env.DEV`), on a responsive
+`Phaser.Scale.FIT` canvas at a 1280×720 base resolution.
 
-- a solid dark background (`#0d0f14`);
-- centered "Hunter Order" text;
-- a live FPS counter shown **only** in development (`import.meta.env.DEV`);
-- a canvas that scales responsively to the viewport (`Phaser.Scale.FIT`,
-  centered), from a base resolution of 1280×720.
+## Environment
+
+`VITE_LOG_LEVEL` (`debug|info|warn|error|silent`) tunes logging; defaults to
+`debug` in dev and `warn` in prod. Override in a git-ignored `.env.local`. See
+[`.env.example`](./.env.example). Only non-secret `VITE_`-prefixed values belong
+in client env — they ship in the public bundle.
 
 ## Commands
 
-Run from the repository root (they delegate to this package) or from
-`apps/game-client`:
+Run from the repository root (they delegate here) or from `apps/game-client`:
 
 ```bash
 pnpm install        # install workspace dependencies (run once at the root)
@@ -70,8 +75,14 @@ pnpm dev            # start the Vite dev server (http://localhost:5173)
 pnpm build          # type-check then produce a production build in dist/
 pnpm preview        # serve the production build locally
 pnpm test           # run unit tests once (vitest run)
-pnpm lint           # run ESLint
+pnpm lint           # run ESLint (incl. import sorting)
 pnpm typecheck      # run tsc --noEmit
 pnpm format         # format sources with Prettier
 pnpm validate       # root aggregate: lint + typecheck + test + build
 ```
+
+## Testing note
+
+Unit tests run in Node and cover the Phaser-free infrastructure. Phaser-touching
+code (`BaseScene`, `game-config`, `bootstrap`) is verified by the build and by
+running the client; add jsdom + a canvas stub when DOM/scene tests are needed.
