@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>HunterOrder.SharedKernel</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Web-aware kernel: the IModule contract references ASP.NET hosting types. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

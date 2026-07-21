@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>HunterOrder.Bootstrap</RootNamespace>
+    <AssemblyName>HunterOrder.Bootstrap</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HunterOrder.Api\HunterOrder.Api.csproj" />
+    <ProjectReference Include="..\Modules\Identity\HunterOrder.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Modules\Accounts\HunterOrder.Modules.Accounts.csproj" />
+    <ProjectReference Include="..\Modules\Characters\HunterOrder.Modules.Characters.csproj" />
+    <ProjectReference Include="..\Modules\World\HunterOrder.Modules.World.csproj" />
+    <ProjectReference Include="..\Modules\Simulation\HunterOrder.Modules.Simulation.csproj" />
+    <ProjectReference Include="..\Modules\Movement\HunterOrder.Modules.Movement.csproj" />
+    <ProjectReference Include="..\Modules\Combat\HunterOrder.Modules.Combat.csproj" />
+    <ProjectReference Include="..\Modules\Inventory\HunterOrder.Modules.Inventory.csproj" />
+    <ProjectReference Include="..\Modules\Gathering\HunterOrder.Modules.Gathering.csproj" />
+    <ProjectReference Include="..\Modules\Clans\HunterOrder.Modules.Clans.csproj" />
+    <ProjectReference Include="..\Modules\Chat\HunterOrder.Modules.Chat.csproj" />
+    <ProjectReference Include="..\Modules\Administration\HunterOrder.Modules.Administration.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>HunterOrder.Modules.Gathering</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\HunterOrder.SharedKernel\HunterOrder.SharedKernel.csproj" />
+  </ItemGroup>
+
+</Project>

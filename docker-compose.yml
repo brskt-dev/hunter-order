@@ -1,4 +1,15 @@
 services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "8080:8080"
+    # No database dependency yet (no functional persistence in this foundation).
+
   postgres:
     image: postgres:18
     environment:
