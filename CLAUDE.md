@@ -8,18 +8,29 @@ Implement small, demonstrable vertical slices without making product decisions o
 
 ## Required reading order
 
-1. `docs/vision/game-pillars.md`
-2. `docs/technical/architecture.md`
-3. `docs/agent/autonomy-policy.md`
-4. `docs/agent/definition-of-done.md`
-5. The relevant game-design document for the task
-6. Existing ADRs and game-design decisions
+1. `docs/vision/game-constitution.md`
+2. `docs/vision/game-pillars.md`
+3. `docs/README.md`
+4. `docs/technical/architecture.md`
+5. `docs/agent/autonomy-policy.md`
+6. `docs/agent/definition-of-done.md`
+7. The relevant game-design document for the task
+8. Existing ADRs and game-design decisions
+
+## Documentation authority
+
+- Markdown committed to this repository is the authoritative source of truth.
+- External notes, chats, Notion pages and whiteboards are non-binding until migrated into the repository.
+- Approved vision belongs in `docs/vision/`.
+- Approved gameplay specifications belong in `docs/game-design/`.
+- Product and gameplay decisions use `GD-XXXX` records in `docs/decisions/`.
+- Unresolved product questions must be escalated instead of inferred from old notes.
 
 ## Non-negotiable rules
 
 - The server is authoritative for world state, movement validation, combat, rewards, inventory and persistence.
 - Do not change gameplay rules, economy, progression or lore without an approved decision.
-- Do not commit directly to `main` or `develop`.
+- Do not commit directly to `main` or `dev`.
 - Use an `agent/<short-description>` branch for autonomous work.
 - Never access production systems or secrets.
 - Never deploy, merge, delete persistent data or perform destructive migrations.
