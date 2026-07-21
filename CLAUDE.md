@@ -63,3 +63,87 @@ If a command does not exist yet, do not invent a replacement silently. Record th
 ## Completion rule
 
 A task is not complete because code was written. It is complete only when the definition of done is satisfied and a human can reproduce the result.
+
+## Branch policy
+
+All autonomous implementation work must start from the latest `dev` branch.
+
+Before making changes:
+
+1. Confirm the working tree is clean.
+2. Checkout `dev`.
+3. Pull the latest changes from `origin/dev`.
+4. Create a new branch using:
+
+   `agent/<short-kebab-case-task-name>`
+
+Examples:
+
+- `agent/basic-player-movement`
+- `agent/resource-gathering`
+- `agent/world-zone-bootstrap`
+
+Never commit directly to:
+
+- `main`
+- `dev`
+
+Pull requests created by autonomous agents must target `dev`.
+
+Only human-approved release pull requests may target `main`.
+
+## Git safety rules
+
+The agent may:
+
+- create `agent/*` branches;
+- create commits;
+- push its own branch;
+- open draft pull requests targeting `dev`;
+- update its own pull request.
+
+The agent must not:
+
+- push directly to `main` or `dev`;
+- force push;
+- delete remote branches;
+- merge pull requests;
+- approve its own pull request;
+- modify branch protection rules;
+- rewrite shared history;
+- use `git reset --hard` on uncommitted human work.
+
+## PixelLab MCP
+
+Quando precisar consultar a documentação das ferramentas do PixelLab, utilize:
+
+@https://api.pixellab.ai/mcp/docs
+
+Não gere assets definitivos sem uma especificação de estilo registrada em
+`docs/art-direction/`.
+
+## Consulta ao Notion
+
+Você possui acesso ao meu workspace do Notion.
+
+Antes de iniciar a implementação, consulte a página **"Ideias e Conceitos"** para compreender a visão do Hunter Order.
+
+Utilize o Notion como fonte de contexto para entender:
+
+- visão geral do projeto;
+- ideias registradas;
+- conceitos de gameplay;
+- inspirações;
+- decisões já documentadas;
+- observações importantes.
+
+Caso existam divergências entre o Notion, o `CLAUDE.md` e minhas instruções durante a conversa, siga sempre esta ordem de prioridade:
+
+1. Minhas instruções nesta conversa.
+2. `CLAUDE.md`.
+3. Documentação do repositório.
+4. Notion.
+
+O Notion deve ser tratado como uma base de conhecimento e consulta.
+
+Não considere ideias registradas como requisitos obrigatórios, a menos que estejam explicitamente definidas como decisões aprovadas ou que eu confirme sua implementação.
