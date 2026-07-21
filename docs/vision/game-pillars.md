@@ -1,20 +1,42 @@
 # Game pillars
 
+> Status: Approved
+> Owner: Game Design Lead
+> Last reviewed: 2026-07-20
+
+The full product authority is the [`Game Constitution`](game-constitution.md). These pillars are the concise filters used during design and implementation.
+
 ## The world is the protagonist
 
-The world evolves faster than Hunters can fully dominate it. Exploration, discovery and adaptation are permanent parts of the experience.
+The world evolves faster than Hunters can fully dominate it. It continues to change independently of any individual player.
 
 ## Everyone is a Hunter
 
-Hunter is an identity, not a class or profession. Players differ through permanent primary and secondary specializations and through shared tertiary skills.
+Hunter is an identity, not a combat class or isolated profession. Different pursuits, specializations and histories create different Hunters.
 
 ## Hunting means pursuing
 
-Hunting may involve creatures, artifacts, ingredients, knowledge, ruins, regions, opportunities, seeds or information. Hunting is not synonymous with killing.
+A hunt may involve creatures, artifacts, ingredients, knowledge, ruins, regions, resources, phenomena, seeds, information or rival Hunters. Hunting is not synonymous with killing.
+
+## Opportunity drives the game
+
+The world creates opportunities. Skills determine which opportunities can be exploited, loot records successful outcomes, and rarity creates prestige and conflict.
+
+## Exploration beats repetition
+
+Knowledge, interpretation and accepted risk should create more value than indefinitely repeating a static farm route. Repeated exploitation must change local conditions.
+
+## Meaningful risk creates meaningful stories
+
+Unknown territory, transport, defeat and competition must matter. Safer controlled zones exist, but safety is contextual, ecological and reversible.
 
 ## Persistent community consequences
 
-The actions of individual Hunters and clans must be able to leave visible, persistent consequences in the world.
+Individual Hunters and clans must be able to leave visible, persistent consequences. Each server should accumulate a distinct history.
+
+## Systemic naturalism
+
+Mechanics should be justified through ecology, society, logistics, geography, institutions or history whenever possible.
 
 ## Long-lived discovery
 
