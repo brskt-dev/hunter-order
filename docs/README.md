@@ -29,6 +29,7 @@ This repository is the authoritative memory of Hunter Order. It records what the
 ## Current game-design documents
 
 - [`game-design/hunter-identity.md`](game-design/hunter-identity.md)
+- [`game-design/world-structure.md`](game-design/world-structure.md)
 - [`game-design/world-dynamics.md`](game-design/world-dynamics.md)
 - [`game-design/progression-risk-and-loot.md`](game-design/progression-risk-and-loot.md)
 - [`game-design/clans-and-conflict.md`](game-design/clans-and-conflict.md)

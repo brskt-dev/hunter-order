@@ -4,7 +4,7 @@
 > Owner: Game Design Lead
 > Last reviewed: 2026-07-20
 
-This document separates approved world behavior from unresolved implementation questions.
+This document separates approved world behavior from unresolved implementation questions. For the structural foundation (server topology, persistence, cities, safety layers, dungeons), see [`world-structure.md`](world-structure.md).
 
 ## Approved principles
 
