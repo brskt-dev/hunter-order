@@ -2,7 +2,7 @@
 
 > Status: Approved
 > Owner: Game Design Lead
-> Last reviewed: 2026-07-20
+> Last reviewed: 2026-07-22
 
 ## Summary
 
@@ -16,19 +16,22 @@ The world does not divide people into Hunters and non-Hunters. Different Hunters
 
 The current specialization model is:
 
-- one permanent primary specialization;
-- one permanent secondary specialization;
-- tertiary skill sets available to all Hunters.
+- one permanent primary specialization, chosen after an initiation and
+  experimentation period rather than at creation;
+- one permanent secondary specialization, unlocked later from the same skill list;
+- tertiary skill sets available to all Hunters and not inherited by successors.
 
 Tertiary skills may include cooking, agriculture, construction, gathering, production and other economic or everyday activities.
 
-The exact specialization catalogue, unlock rules and progression curves are not yet defined. Agents must not invent them.
+The full character mechanics — attributes, skills, succession and lineage — are defined in [`character-system.md`](character-system.md). The exact skill catalogues and progression curves are not yet defined. Agents must not invent them.
 
 ## One person, one Hunter
 
 The initial product rule is one verified person per Hunter account. In Brazil, one CPF maps to one Hunter.
 
-This latest rule supersedes the older Notion statement that a player could create another character to follow a different permanent identity. Alternate characters, respec systems and international verification require future decisions.
+An identity has exactly one **active** Hunter at a time. Over time it may accumulate multiple **historical** Hunters through succession, forming a sequential lineage — never parallel characters and never a respec. This is defined in [`character-system.md`](character-system.md).
+
+International identity verification remains an open decision.
 
 ## Pursuit
 

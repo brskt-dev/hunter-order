@@ -2,7 +2,7 @@
 
 > Status: Approved principles with balancing details open
 > Owner: Game Design Lead
-> Last reviewed: 2026-07-20
+> Last reviewed: 2026-07-22
 
 ## Progression hierarchy
 
@@ -80,28 +80,10 @@ The exact tracking, visibility and PvP rules remain open.
 
 Defeat must carry a high cost. It should create caution before unknown regions and make successful return part of the hunt.
 
-The baseline loss model, protected equipment rules and PvP/PvE differences require dedicated balancing work.
+Defeat in ordinary combat is **incapacitation**, not permanent death: the Hunter survives and is rescued by a Merchant. The full defeat, rescue, item-recovery, respawn and debt model is defined in [`character-system.md`](character-system.md). The baseline loss model, protected-equipment rules and PvP/PvE differences require dedicated balancing work.
 
-## Merchant recovery event
+## Merchant recovery
 
-After defeat, a random recovery event may occur:
+On incapacitation, a Merchant rescues the Hunter — this is the standard outcome of defeat, not a random event — and recovers a random number of carried items, between one and five, selected by rarity with a random draw to break ties. Remaining items stay at the location and follow a reserved → public-loot → despawn cycle. The rescue is charged and may create an automatically repaid debt.
 
-> A merchant found the defeated Hunter and carried them to the nearest city. The wagon had limited free space.
-
-Current rule:
-
-1. The event has an unspecified chance to trigger.
-2. The wagon recovers a random number of carried items from one to five.
-3. Selection prioritizes item rarity.
-4. Equal-rarity items are selected randomly.
-5. The event reports which items were recovered.
-
-Still unresolved:
-
-- trigger probability;
-- whether equipped items are eligible;
-- rarity ordering details;
-- whether destroyed, stolen and dropped items share one model;
-- interaction with PvP interception;
-- whether the merchant charges a fee;
-- anti-exploit constraints.
+Authoritative detail (item-cycle phases, respawn, debt and the open balancing values) lives in [`character-system.md`](character-system.md). Item rarity, eligibility and exceptions are owned by the item system.

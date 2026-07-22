@@ -2,7 +2,7 @@
 
 > Status: Approved
 > Owner: Game Design Lead
-> Last reviewed: 2026-07-20
+> Last reviewed: 2026-07-22
 
 > Hunter Order is a sandbox MMORPG where a living world constantly generates opportunities, and Hunters transform those opportunities into unique stories.
 
@@ -112,9 +112,7 @@ Transport creates uncertainty and emergent conflict. Other Hunters may know that
 
 Defeat must be expensive enough to preserve tension. It must not become a trivial reset.
 
-Hunter Order also avoids arbitrary loss without world context. A recovery event may occur in which a merchant finds the defeated Hunter and transports them to the nearest city. The merchant has limited wagon space and can recover a random number of carried items from one to five.
-
-Recovered items are selected by rarity, with random selection used to break ties between items of equal rarity. The exact event probability, eligibility rules and loss model require dedicated balancing specifications.
+Hunter Order also avoids arbitrary loss without world context. Defeat in ordinary combat is incapacitation rather than permanent death: a merchant rescues the defeated Hunter and transports them to the nearest functional settlement, recovering only part of what they carried. The [character system](../game-design/character-system.md) defines this model; exact eligibility and loss values require dedicated balancing.
 
 ## Systemic naturalism
 
