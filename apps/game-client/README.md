@@ -3,9 +3,9 @@
 Browser game client for Hunter Order. It contains the **client infrastructure**
 (rendering stack, application architecture) and the **first playable-loop
 greybox** — a benchmark-only, non-authoritative vertical slice with continuous
-movement, static collision and an exploration camera. Final combat, interaction,
-inventory, AI, networking, persistence, HUD and production art are **not**
-implemented yet.
+movement, static collision, an exploration camera and a first environmental
+interaction. Final combat, item pickup, inventory, AI, networking, persistence,
+HUD and production art are **not** implemented yet.
 
 ## Stack
 
@@ -47,7 +47,8 @@ src/
     context/              GameContext + createGameContext (composition root)
     scenes/               BaseScene, SceneKeys
   gameplay/               Phaser-free domain: vec2, direction, movement-intent,
-                          movement, collision, world, camera, benchmark-sim
+                          movement, collision, interaction, world, camera,
+                          benchmark-sim
   scenes/
     boot-scene.ts         Boot screen (title + dev FPS) → hands off to benchmark
     benchmark-scene.ts    First playable-loop greybox (thin Phaser adapter)
@@ -79,16 +80,20 @@ spawn pocket; a Hunter placeholder (feet-pivot body + separate runtime shadow +
 frame-rate-independent movement with normalized diagonals and immediate
 stop/turn; circular-footprint collision against solids and world bounds with
 wall sliding; an exploration camera that follows with smooth, direction-based
-look-ahead and stays within world bounds. `R` restarts the scene; losing window
-focus releases held keys.
+look-ahead and stays within world bounds. A blocking **overgrowth obstruction**
+can be cleared with the axe: a contextual `[E] Cut` prompt appears only when the
+Hunter is in range, and clearing it opens the passage. `R` restarts the scene;
+losing window focus releases held keys.
 
-| Input                        | Action                              |
-| ---------------------------- | ----------------------------------- |
-| `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable) |
-| `R`                          | Restart the scene                   |
+| Input                        | Action                                       |
+| ---------------------------- | -------------------------------------------- |
+| `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable)          |
+| `E`                          | Interact with the obstruction in range (cut) |
+| `R`                          | Restart the scene                            |
 
-**Where the logic lives.** All movement, collision, facing and camera math is in
-the Phaser-free, unit-tested `src/gameplay/` core (`@gameplay`). `BenchmarkScene`
+**Where the logic lives.** All movement, collision, facing, camera and
+interaction logic is in the Phaser-free, unit-tested `src/gameplay/` core
+(`@gameplay`). `BenchmarkScene`
 is a thin Phaser adapter: it reads input, drives the simulation and renders the
 resulting logical state with placeholder primitives. Logical position (owned by
 the simulation) is kept separate from the rendered position (GD-0004).
@@ -97,14 +102,15 @@ the simulation) is kept separate from the rendered position (GD-0004).
 **non-authoritative** — there is no realtime server transport yet (that needs
 its own ADR; see
 [GD-0004](../../docs/decisions/GD-0004-movement-and-exploration.md)). Every
-feel / geometry value (speed, footprint radius, look-ahead, smoothing, camera
-lerp, greybox layout, palette) is a provisional value centralized in
+feel / geometry value (speed, footprint radius, interaction range, look-ahead,
+smoothing, camera lerp, greybox layout, palette) is a provisional value
+centralized in
 [`src/core/config/benchmark.ts`](./src/core/config/benchmark.ts) and marked
 temporary — not an approved game rule.
 
-**Not yet implemented:** environmental interaction, item pickup, the ruin-hound
-threat, combat, the combat camera, loop-completion feedback, and all production
-art. These are the next increments.
+**Not yet implemented:** item pickup, the ruin-hound threat, combat, the combat
+camera, loop-completion feedback, and all production art. These are the next
+increments.
 
 Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
 `http://localhost:5173`, wait for the greybox, then walk the Hunter with WASD /

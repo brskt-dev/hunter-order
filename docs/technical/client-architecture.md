@@ -33,7 +33,7 @@ shared/        Zero-dependency utilities (assert)
 
 gameplay/      Phaser-free domain logic driven by scenes (pure, unit-tested):
                vec2 · direction · movement-intent · movement · collision ·
-               world · camera · benchmark simulation
+               interaction · world · camera · benchmark simulation
 ```
 
 - `shared` depends on nothing.
@@ -44,20 +44,20 @@ gameplay/      Phaser-free domain logic driven by scenes (pure, unit-tested):
 
 ## Modules (`src/`)
 
-| Path             | Responsibility                                                                     |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `main.ts`        | Entry point. Calls `createGame('game-root')`.                                      |
-| `app/`           | `bootstrap.ts` (`createGame`), `game-config.ts` (Phaser config).                   |
-| `core/config/`   | `constants.ts`, `env.ts` (typed `import.meta.env`, dev/prod).                      |
-| `core/logger/`   | Scoped, level-gated logger with injectable sink.                                   |
-| `core/events/`   | Typed `EventBus<M>` + `GameEventMap` (app lifecycle events).                       |
-| `core/services/` | `Service` contract + `ServiceRegistry` (service locator seam).                     |
-| `core/context/`  | `GameContext` + `createGameContext()` (the composition root).                      |
-| `core/scenes/`   | `BaseScene` (context access) + `SceneKeys`.                                        |
-| `gameplay/`      | Phaser-free domain: movement, collision, camera math, tile world, benchmark sim.   |
-| `scenes/`        | Feature scenes (`BootScene`, `BenchmarkScene`). `index.ts` exports `sceneClasses`. |
-| `shared/utils/`  | `assert`, `assertDefined`.                                                         |
-| `assets/`        | Bundled asset organization (see its README).                                       |
+| Path             | Responsibility                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `main.ts`        | Entry point. Calls `createGame('game-root')`.                                            |
+| `app/`           | `bootstrap.ts` (`createGame`), `game-config.ts` (Phaser config).                         |
+| `core/config/`   | `constants.ts`, `env.ts` (typed `import.meta.env`, dev/prod).                            |
+| `core/logger/`   | Scoped, level-gated logger with injectable sink.                                         |
+| `core/events/`   | Typed `EventBus<M>` + `GameEventMap` (app lifecycle events).                             |
+| `core/services/` | `Service` contract + `ServiceRegistry` (service locator seam).                           |
+| `core/context/`  | `GameContext` + `createGameContext()` (the composition root).                            |
+| `core/scenes/`   | `BaseScene` (context access) + `SceneKeys`.                                              |
+| `gameplay/`      | Phaser-free domain: movement, collision, interaction, camera, tile world, benchmark sim. |
+| `scenes/`        | Feature scenes (`BootScene`, `BenchmarkScene`). `index.ts` exports `sceneClasses`.       |
+| `shared/utils/`  | `assert`, `assertDefined`.                                                               |
+| `assets/`        | Bundled asset organization (see its README).                                             |
 
 ## Composition root: `GameContext`
 
