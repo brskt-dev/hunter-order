@@ -4,6 +4,7 @@
  */
 export const SceneKeys = {
   Boot: 'boot',
+  Benchmark: 'benchmark',
 } as const;
 
 export type SceneKey = (typeof SceneKeys)[keyof typeof SceneKeys];

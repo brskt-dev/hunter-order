@@ -1,7 +1,9 @@
 # Client architecture
 
 Architecture of the Hunter Order browser client (`apps/game-client`). This
-document describes the **infrastructure** only — no gameplay systems exist yet.
+document describes the client **infrastructure** and the first gameplay slice —
+the benchmark greybox (`scenes/benchmark-scene.ts` plus the Phaser-free
+`gameplay/` domain). Most gameplay systems still do not exist.
 
 See also: [`architecture.md`](./architecture.md) (whole-system direction) and the
 package [`README`](../../apps/game-client/README.md).
@@ -20,7 +22,7 @@ package [`README`](../../apps/game-client/README.md).
 Dependencies point **downward** only:
 
 ```text
-scenes/        Feature scenes (BootScene). Extend BaseScene.
+scenes/        Feature scenes (BootScene, BenchmarkScene). Extend BaseScene.
    │
 app/           Composition & startup: bootstrap(), game-config
    │
@@ -28,28 +30,34 @@ core/          Framework-light building blocks
    │             config · logger · events · services · context · scenes(base)
    │
 shared/        Zero-dependency utilities (assert)
+
+gameplay/      Phaser-free domain logic driven by scenes (pure, unit-tested):
+               vec2 · direction · movement-intent · movement · collision ·
+               world · camera · benchmark simulation
 ```
 
 - `shared` depends on nothing.
 - `core` depends on `shared` only.
 - `app` depends on `core` (and the `scenes` list it registers).
-- `scenes` depend on `core`.
+- `gameplay` is pure TypeScript (no Phaser), depending only on itself.
+- `scenes` depend on `core` and `gameplay`.
 
 ## Modules (`src/`)
 
-| Path             | Responsibility                                                        |
-| ---------------- | -------------------------------------------------------------------- |
-| `main.ts`        | Entry point. Calls `createGame('game-root')`.                        |
-| `app/`           | `bootstrap.ts` (`createGame`), `game-config.ts` (Phaser config).     |
-| `core/config/`   | `constants.ts`, `env.ts` (typed `import.meta.env`, dev/prod).        |
-| `core/logger/`   | Scoped, level-gated logger with injectable sink.                     |
-| `core/events/`   | Typed `EventBus<M>` + `GameEventMap` (app lifecycle events).         |
-| `core/services/` | `Service` contract + `ServiceRegistry` (service locator seam).       |
-| `core/context/`  | `GameContext` + `createGameContext()` (the composition root).        |
-| `core/scenes/`   | `BaseScene` (context access) + `SceneKeys`.                          |
-| `scenes/`        | Feature scenes. `index.ts` exports the ordered `sceneClasses`.       |
-| `shared/utils/`  | `assert`, `assertDefined`.                                           |
-| `assets/`        | Bundled asset organization (see its README).                        |
+| Path             | Responsibility                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `main.ts`        | Entry point. Calls `createGame('game-root')`.                                      |
+| `app/`           | `bootstrap.ts` (`createGame`), `game-config.ts` (Phaser config).                   |
+| `core/config/`   | `constants.ts`, `env.ts` (typed `import.meta.env`, dev/prod).                      |
+| `core/logger/`   | Scoped, level-gated logger with injectable sink.                                   |
+| `core/events/`   | Typed `EventBus<M>` + `GameEventMap` (app lifecycle events).                       |
+| `core/services/` | `Service` contract + `ServiceRegistry` (service locator seam).                     |
+| `core/context/`  | `GameContext` + `createGameContext()` (the composition root).                      |
+| `core/scenes/`   | `BaseScene` (context access) + `SceneKeys`.                                        |
+| `gameplay/`      | Phaser-free domain: movement, collision, camera math, tile world, benchmark sim.   |
+| `scenes/`        | Feature scenes (`BootScene`, `BenchmarkScene`). `index.ts` exports `sceneClasses`. |
+| `shared/utils/`  | `assert`, `assertDefined`.                                                         |
+| `assets/`        | Bundled asset organization (see its README).                                       |
 
 ## Composition root: `GameContext`
 
@@ -71,8 +79,8 @@ any scene boots). `BaseScene` then exposes it to every scene:
 ```ts
 export class MyScene extends BaseScene {
   create() {
-    this.log.info('ready'); // scoped logger (this.context.logger.child(key))
-    this.bus.emit('scene:started', { key: this.scene.key });
+    this.log.info("ready"); // scoped logger (this.context.logger.child(key))
+    this.bus.emit("scene:started", { key: this.scene.key });
     // this.context.env / this.context.services also available
   }
 }
@@ -102,11 +110,13 @@ in the public bundle.
 
 ## Testing strategy
 
-Infrastructure modules are Phaser-free and unit-tested in a Node environment
-(`logger`, `event-bus`, `service-registry`, `env` parser, `assert`, `constants`,
-`game-context`). `BaseScene`, `game-config` and `bootstrap` touch Phaser and are
-verified by the production build and by running the client. When DOM/scene tests
-are needed, add a browser-like environment (jsdom) plus a canvas stub.
+Infrastructure and domain modules are Phaser-free and unit-tested in a Node
+environment (`logger`, `event-bus`, `service-registry`, `env` parser, `assert`,
+`constants`, `game-context`, and the whole `gameplay/` domain — movement,
+collision, camera, world, simulation). `BaseScene`, `game-config`, `bootstrap`
+and `BenchmarkScene` touch Phaser and are verified by the production build and by
+running the client. When DOM/scene tests are needed, add a browser-like
+environment (jsdom) plus a canvas stub.
 
 ## How to extend
 
