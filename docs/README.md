@@ -34,6 +34,11 @@ This repository is the authoritative memory of Hunter Order. It records what the
 - [`game-design/world-dynamics.md`](game-design/world-dynamics.md)
 - [`game-design/progression-risk-and-loot.md`](game-design/progression-risk-and-loot.md)
 - [`game-design/clans-and-conflict.md`](game-design/clans-and-conflict.md)
+- [`game-design/visual-direction.md`](game-design/visual-direction.md)
+
+## Technical specifications
+
+- [`technical/asset-specification.md`](technical/asset-specification.md) — sprite/canvas/pivot/naming/metadata/layers (see also [`technical/art-pipeline.md`](technical/art-pipeline.md)).
 
 ## Status rules
 

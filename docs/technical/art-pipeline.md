@@ -2,11 +2,16 @@
 
 > Status: Approved direction
 > Owner: Art Direction and Technical Lead
-> Last reviewed: 2026-07-20
+> Last reviewed: 2026-07-23
 
 ## Objective
 
 Create a reproducible and scalable sprite-production workflow that preserves visual consistency while reducing manual repetition.
+
+This pipeline produces assets to the standards defined in
+[`../game-design/visual-direction.md`](../game-design/visual-direction.md)
+(art direction) and [`asset-specification.md`](asset-specification.md) (sizes,
+pivots, anchors, directions, naming, metadata, layers, statuses).
 
 The official direction is:
 
@@ -91,15 +96,14 @@ An asset is not final until it passes applicable checks:
 
 ## Open implementation decisions
 
-The following details are not yet standardized:
+Asset directory layout, file naming, metadata schema, sprite dimensions, direction
+counts, animation frame budgets, asset statuses and provenance are now specified in
+[`asset-specification.md`](asset-specification.md) (adopted by
+[`GD-0005`](../decisions/GD-0005-visual-direction-and-asset-foundation.md)). The
+following remain not yet standardized:
 
-- asset directory layout;
-- file naming convention;
-- metadata schema;
-- sprite dimensions by category;
-- palette registry;
-- direction count;
-- animation frame budgets;
+- palette hex registry;
 - PixelLab API integration;
+- atlas-generation tool and runtime loading;
 - review and approval tooling;
-- licensing and provenance records.
+- licensing records.
