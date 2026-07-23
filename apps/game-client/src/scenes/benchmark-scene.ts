@@ -6,6 +6,7 @@ import {
   createTileWorld,
   type Direction8,
   intentFromActions,
+  type Interactable,
   lookAheadTarget,
   type MovementAction,
   smoothTowards,
@@ -18,12 +19,12 @@ import Phaser from 'phaser';
 /**
  * First-playable-loop greybox — the "Overgrown Ruin" benchmark scene.
  *
- * This is a thin Phaser adapter: all movement, collision and camera *logic*
- * lives in the Phaser-free, unit-tested {@link BenchmarkSimulation} and the
- * `@gameplay` core. The scene reads keyboard input, drives the simulation, and
- * renders the resulting logical state with placeholder primitives. Logical
- * position (owned by the simulation) is kept strictly separate from the
- * rendered position (set here) — GD-0004.
+ * This is a thin Phaser adapter: all movement, collision, camera and
+ * interaction *logic* lives in the Phaser-free, unit-tested
+ * {@link BenchmarkSimulation} and the `@gameplay` core. The scene reads keyboard
+ * input, drives the simulation, and renders the resulting logical state with
+ * placeholder primitives. Logical position (owned by the simulation) is kept
+ * strictly separate from the rendered position (set here) — GD-0004.
  *
  * The world is rendered with an identity logical->screen projection for now;
  * the oblique presentation is a later art-pass concern and, per GD-0004, must
@@ -34,13 +35,14 @@ import Phaser from 'phaser';
  */
 
 // Render layer depths, following the approved layer stack (asset-specification):
-// ground / ground-decal / low-object / shadow / entity-body / ui-over-world.
+// ground / ground-decal / low-object / shadow / entity-body / world-ui.
 const DEPTH = {
   ground: 0,
   groundDecal: 10,
   lowObject: 100,
   shadow: 200,
   entity: 1000, // + pivot.y so entities sort front-to-back by their feet
+  worldUi: 90_000,
   ui: 100_000,
 } as const;
 
@@ -62,7 +64,11 @@ const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
   nw: { x: -DIAGONAL, y: -DIAGONAL },
 };
 
-interface MovementKeys {
+// Contextual prompt verb per interactable kind (benchmark placeholder).
+const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut' };
+const cssHex = (value: number): string => `#${value.toString(16).padStart(6, '0')}`;
+
+interface InputKeys {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
   left: Phaser.Input.Keyboard.Key;
@@ -71,6 +77,7 @@ interface MovementKeys {
   a: Phaser.Input.Keyboard.Key;
   s: Phaser.Input.Keyboard.Key;
   d: Phaser.Input.Keyboard.Key;
+  interact: Phaser.Input.Keyboard.Key;
   restart: Phaser.Input.Keyboard.Key;
 }
 
@@ -80,8 +87,10 @@ export class BenchmarkScene extends BaseScene {
   private hunter!: Phaser.GameObjects.Container;
   private shadow!: Phaser.GameObjects.Ellipse;
   private facingTick!: Phaser.GameObjects.Rectangle;
-  private keys?: MovementKeys;
+  private keys?: InputKeys;
   private lookAhead: Vec2 = ZERO;
+  private readonly interactableViews = new Map<string, Phaser.GameObjects.Rectangle>();
+  private prompt?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -98,14 +107,23 @@ export class BenchmarkScene extends BaseScene {
       spawnTile: BENCHMARK.spawnTile,
       solidTiles: BENCHMARK.solidTiles,
     });
-    this.sim = new BenchmarkSimulation(this.world, {
-      speed: BENCHMARK.movement.walkSpeed,
-      footprintRadius: BENCHMARK.hunter.footprintRadius,
-    });
+    const interactables = this.buildInteractables();
+    this.sim = new BenchmarkSimulation(
+      this.world,
+      {
+        speed: BENCHMARK.movement.walkSpeed,
+        footprintRadius: BENCHMARK.hunter.footprintRadius,
+        interactRange: BENCHMARK.interaction.range,
+      },
+      interactables,
+    );
     this.lookAhead = ZERO;
+    this.interactableViews.clear();
 
     this.drawWorld();
+    this.drawInteractables(interactables);
     this.createHunter();
+    this.createPrompt();
     this.setupCamera();
     this.setupInput();
     this.addHint();
@@ -125,6 +143,10 @@ export class BenchmarkScene extends BaseScene {
     const actions = this.readActions();
     this.sim.update(actions, dt);
 
+    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.interact)) {
+      this.handleInteract();
+    }
+
     const { position, facing } = this.sim.hunter;
     this.hunter.setPosition(position.x, position.y);
     this.hunter.setDepth(DEPTH.entity + position.y); // pivot.y sorting
@@ -136,9 +158,27 @@ export class BenchmarkScene extends BaseScene {
       -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
     );
 
+    this.updatePrompt();
+
     const target = lookAheadTarget(intentFromActions(actions), BENCHMARK.camera.lookAheadDistance);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
     this.cameras.main.setFollowOffset(-this.lookAhead.x, -this.lookAhead.y);
+  }
+
+  private buildInteractables(): Interactable[] {
+    const ts = BENCHMARK.tileSize;
+    return BENCHMARK.interactables.map((it) => ({
+      id: it.id,
+      kind: it.kind,
+      bounds: {
+        x: it.tile.col * ts,
+        y: it.tile.row * ts,
+        width: it.tile.cols * ts,
+        height: it.tile.rows * ts,
+      },
+      blocksWhileActive: it.blocksWhileActive,
+      state: 'active' as const,
+    }));
   }
 
   private drawWorld(): void {
@@ -171,6 +211,18 @@ export class BenchmarkScene extends BaseScene {
         .setOrigin(0, 0)
         .setStrokeStyle(2, colors.solidStroke)
         .setDepth(DEPTH.lowObject);
+    }
+  }
+
+  private drawInteractables(interactables: readonly Interactable[]): void {
+    const { colors } = BENCHMARK;
+    for (const it of interactables) {
+      const view = this.add
+        .rectangle(it.bounds.x, it.bounds.y, it.bounds.width, it.bounds.height, colors.overgrowth)
+        .setOrigin(0, 0)
+        .setStrokeStyle(2, colors.overgrowthStroke)
+        .setDepth(DEPTH.lowObject + 1);
+      this.interactableViews.set(it.id, view);
     }
   }
 
@@ -207,6 +259,20 @@ export class BenchmarkScene extends BaseScene {
       .setDepth(DEPTH.entity + spawn.y);
   }
 
+  private createPrompt(): void {
+    this.prompt = this.add
+      .text(0, 0, '', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: cssHex(BENCHMARK.colors.prompt),
+        backgroundColor: 'rgba(12,15,12,0.8)',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+  }
+
   private setupCamera(): void {
     const camera = this.cameras.main;
     camera.setBounds(0, 0, this.world.bounds.width, this.world.bounds.height);
@@ -229,8 +295,9 @@ export class BenchmarkScene extends BaseScene {
       a: Phaser.Input.Keyboard.KeyCodes.A,
       s: Phaser.Input.Keyboard.KeyCodes.S,
       d: Phaser.Input.Keyboard.KeyCodes.D,
+      interact: Phaser.Input.Keyboard.KeyCodes.E,
       restart: Phaser.Input.Keyboard.KeyCodes.R,
-    }) as MovementKeys;
+    }) as InputKeys;
 
     // Losing focus releases held keys so the Hunter never "runs away" while the
     // player is typing elsewhere (GD-0004 controls: focus loss releases keys).
@@ -249,11 +316,44 @@ export class BenchmarkScene extends BaseScene {
       .text(
         12,
         GAME_HEIGHT - 22,
-        'WASD / Arrows: move   ·   R: restart   ·   greybox benchmark (non-authoritative)',
+        'WASD / Arrows: move   ·   E: interact   ·   R: restart   ·   greybox benchmark (non-authoritative)',
         { fontFamily: 'monospace', fontSize: '12px', color: COLORS.accent },
       )
       .setScrollFactor(0)
       .setDepth(DEPTH.ui);
+  }
+
+  private handleInteract(): void {
+    const cleared = this.sim.tryInteract();
+    if (!cleared) {
+      return;
+    }
+    const view = this.interactableViews.get(cleared.id);
+    if (view) {
+      this.tweens.add({
+        targets: view,
+        alpha: 0,
+        duration: 180,
+        onComplete: () => view.setVisible(false),
+      });
+    }
+    this.log.info('Benchmark interaction: cleared obstruction', cleared.id);
+  }
+
+  private updatePrompt(): void {
+    if (!this.prompt) {
+      return;
+    }
+    const target = this.sim.target;
+    if (!target) {
+      this.prompt.setVisible(false);
+      return;
+    }
+    const label = INTERACT_LABEL[target.kind] ?? 'Use';
+    this.prompt
+      .setText(`[E] ${label}`)
+      .setPosition(target.bounds.x + target.bounds.width / 2, target.bounds.y - 8)
+      .setVisible(true);
   }
 
   private readActions(): ReadonlySet<MovementAction> {
