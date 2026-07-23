@@ -1,8 +1,10 @@
 # @hunter-order/game-client
 
-Browser game client for Hunter Order. This package contains the **client
-infrastructure** — the rendering stack, application architecture and a minimal
-boot screen. No gameplay, player, map, camera, networking, HUD or assets are
+Browser game client for Hunter Order. It contains the **client infrastructure**
+(rendering stack, application architecture) and the **first playable-loop
+greybox** — a benchmark-only, non-authoritative vertical slice with continuous
+movement, static collision and an exploration camera. Final combat, interaction,
+inventory, AI, networking, persistence, HUD and production art are **not**
 implemented yet.
 
 ## Stack
@@ -26,9 +28,10 @@ slice.
 
 Full write-up: [`docs/technical/client-architecture.md`](../../docs/technical/client-architecture.md).
 
-Layered, dependencies point downward: `scenes → app → core → shared`. A single
-`GameContext` (env, logger, event bus, service registry) is built at bootstrap
-and injected into Phaser so every `BaseScene` can reach it.
+Layered, dependencies point downward: `scenes → app → core → shared`, plus a
+Phaser-free `gameplay` domain the scenes drive. A single `GameContext` (env,
+logger, event bus, service registry) is built at bootstrap and injected into
+Phaser so every `BaseScene` can reach it.
 
 ```text
 src/
@@ -43,20 +46,70 @@ src/
     services/             Service contract + ServiceRegistry
     context/              GameContext + createGameContext (composition root)
     scenes/               BaseScene, SceneKeys
+  gameplay/               Phaser-free domain: vec2, direction, movement-intent,
+                          movement, collision, world, camera, benchmark-sim
   scenes/
-    boot-scene.ts         Boot screen (title + dev FPS); reference BaseScene usage
+    boot-scene.ts         Boot screen (title + dev FPS) → hands off to benchmark
+    benchmark-scene.ts    First playable-loop greybox (thin Phaser adapter)
     index.ts              sceneClasses registry
   shared/utils/           assert / assertDefined
   assets/                 bundled asset organization (see assets/README.md)
 ```
 
-Path aliases: `@app`, `@core/*`, `@scenes`, `@shared/*`, `@assets/*`, `@/*`.
+Path aliases: `@app`, `@core/*`, `@gameplay`, `@scenes`, `@shared/*`,
+`@assets/*`, `@/*`.
 
 ## Boot screen
 
 `BootScene` renders a solid background (`#0d0f14`), a centered "Hunter Order"
 title, a dev-only FPS counter (`import.meta.env.DEV`), on a responsive
-`Phaser.Scale.FIT` canvas at a 1280×720 base resolution.
+`Phaser.Scale.FIT` canvas at a 1280×720 base resolution. After a short splash it
+hands off to `BenchmarkScene`.
+
+## First playable loop — greybox benchmark
+
+`BenchmarkScene` is the first playable vertical slice of the
+[first-playable-loop benchmark](../../docs/game-design/first-playable-loop-benchmark.md):
+an "Overgrown Ruin" greybox you can move a placeholder Hunter around.
+
+**Implemented (this slice):** boot → benchmark handoff; a 32×32 logical-tile
+greybox with a tile grid, static ruin-wall / tree / debris obstacles and a safe
+spawn pocket; a Hunter placeholder (feet-pivot body + separate runtime shadow +
+8-direction facing tick); semantic input (WASD / arrows) → continuous,
+frame-rate-independent movement with normalized diagonals and immediate
+stop/turn; circular-footprint collision against solids and world bounds with
+wall sliding; an exploration camera that follows with smooth, direction-based
+look-ahead and stays within world bounds. `R` restarts the scene; losing window
+focus releases held keys.
+
+| Input                        | Action                              |
+| ---------------------------- | ----------------------------------- |
+| `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable) |
+| `R`                          | Restart the scene                   |
+
+**Where the logic lives.** All movement, collision, facing and camera math is in
+the Phaser-free, unit-tested `src/gameplay/` core (`@gameplay`). `BenchmarkScene`
+is a thin Phaser adapter: it reads input, drives the simulation and renders the
+resulting logical state with placeholder primitives. Logical position (owned by
+the simulation) is kept separate from the rendered position (GD-0004).
+
+**Benchmark-only / temporary.** The client-side simulation is
+**non-authoritative** — there is no realtime server transport yet (that needs
+its own ADR; see
+[GD-0004](../../docs/decisions/GD-0004-movement-and-exploration.md)). Every
+feel / geometry value (speed, footprint radius, look-ahead, smoothing, camera
+lerp, greybox layout, palette) is a provisional value centralized in
+[`src/core/config/benchmark.ts`](./src/core/config/benchmark.ts) and marked
+temporary — not an approved game rule.
+
+**Not yet implemented:** environmental interaction, item pickup, the ruin-hound
+threat, combat, the combat camera, loop-completion feedback, and all production
+art. These are the next increments.
+
+Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
+`http://localhost:5173`, wait for the greybox, then walk the Hunter with WASD /
+arrows — bump into and slide along the ruin walls, feel the camera lead your
+movement, and press `R` to restart.
 
 ## Environment
 
