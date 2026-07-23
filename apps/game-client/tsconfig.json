@@ -11,6 +11,8 @@
       "@app": ["src/app/index.ts"],
       "@app/*": ["src/app/*"],
       "@core/*": ["src/core/*"],
+      "@gameplay": ["src/gameplay/index.ts"],
+      "@gameplay/*": ["src/gameplay/*"],
       "@scenes": ["src/scenes/index.ts"],
       "@scenes/*": ["src/scenes/*"],
       "@shared/*": ["src/shared/*"],
