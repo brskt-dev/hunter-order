@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HunterOrder.SharedKernel\HunterOrder.SharedKernel.csproj" />
     <ProjectReference Include="..\..\src\HunterOrder.Api\HunterOrder.Api.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Movement\HunterOrder.Modules.Movement.csproj" />
   </ItemGroup>
 
 </Project>
