@@ -14,6 +14,14 @@ export type { Rect } from './collision';
 export { resolveMovement } from './collision';
 export type { Direction8 } from './direction';
 export { DEFAULT_FACING, directionFromVector } from './direction';
+export {
+  activeBlockingRects,
+  clearInteractable,
+  distanceToBounds,
+  findInteractTarget,
+  type Interactable,
+  type InteractableState,
+} from './interaction';
 export { clampDeltaSeconds, stepPosition } from './movement';
 export type { MovementAction } from './movement-intent';
 export { intentFromActions } from './movement-intent';
