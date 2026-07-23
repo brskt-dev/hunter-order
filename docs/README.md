@@ -36,6 +36,7 @@ This repository is the authoritative memory of Hunter Order. It records what the
 - [`game-design/progression-risk-and-loot.md`](game-design/progression-risk-and-loot.md)
 - [`game-design/clans-and-conflict.md`](game-design/clans-and-conflict.md)
 - [`game-design/visual-direction.md`](game-design/visual-direction.md)
+- [`game-design/first-playable-loop-benchmark.md`](game-design/first-playable-loop-benchmark.md) — Draft
 
 ## Technical specifications
 
