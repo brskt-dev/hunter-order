@@ -4,7 +4,7 @@ import {
   BenchmarkSimulation,
   clampDeltaSeconds,
   createTileWorld,
-  type Direction8,
+  directionToVector,
   intentFromActions,
   type Interactable,
   lookAheadTarget,
@@ -52,6 +52,7 @@ const DEPTH = {
   itemDrop: 150, // ground items sit above low objects but below the Hunter/shadow
   shadow: 200,
   entity: 1000, // + pivot.y so entities sort front-to-back by their feet
+  effect: 3000, // transient combat effects (swing, hit flash) above all entities
   worldUi: 90_000,
   ui: 100_000,
 } as const;
@@ -79,19 +80,8 @@ const lerpScalar = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 // Physical key codes for the non-movement semantic actions.
 const INTERACT_CODE = 'KeyE';
+const ATTACK_CODE = 'Space';
 const RESTART_CODE = 'KeyR';
-
-const DIAGONAL = Math.SQRT1_2;
-const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
-  n: { x: 0, y: -1 },
-  ne: { x: DIAGONAL, y: -DIAGONAL },
-  e: { x: 1, y: 0 },
-  se: { x: DIAGONAL, y: DIAGONAL },
-  s: { x: 0, y: 1 },
-  sw: { x: -DIAGONAL, y: DIAGONAL },
-  w: { x: -1, y: 0 },
-  nw: { x: -DIAGONAL, y: -DIAGONAL },
-};
 
 // Contextual prompt verb per interactable kind (benchmark placeholder).
 const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut', fragment: 'Pick up' };
@@ -118,6 +108,7 @@ export class BenchmarkScene extends BaseScene {
   private dangerOverlay?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
+  private attackQueued = false;
   private restartQueued = false;
   private lookAhead: Vec2 = ZERO;
   private combatIntensity = 0;
@@ -145,6 +136,9 @@ export class BenchmarkScene extends BaseScene {
         speed: BENCHMARK.movement.walkSpeed,
         footprintRadius: BENCHMARK.hunter.footprintRadius,
         interactRange: BENCHMARK.interaction.range,
+        attackRange: BENCHMARK.combat.attackRange,
+        attackArcCos: BENCHMARK.combat.attackArcCos,
+        attackCooldownSeconds: BENCHMARK.combat.attackCooldownSeconds,
       },
       interactables,
       this.buildHoundConfig(),
@@ -152,6 +146,7 @@ export class BenchmarkScene extends BaseScene {
     this.lookAhead = ZERO;
     this.combatIntensity = 0;
     this.dangerAlpha = 0;
+    this.attackQueued = false;
     this.interactableViews.clear();
 
     this.drawWorld();
@@ -177,6 +172,8 @@ export class BenchmarkScene extends BaseScene {
       deAggroRadius: h.deAggroRadius,
       contactRadius: h.contactRadius,
       arriveEpsilon: h.arriveEpsilon,
+      hitsToRepel: h.hitsToRepel,
+      fleeSpeedMultiplier: h.fleeSpeedMultiplier,
     };
   }
 
@@ -200,12 +197,17 @@ export class BenchmarkScene extends BaseScene {
       this.handleInteract();
     }
 
+    if (this.attackQueued) {
+      this.attackQueued = false;
+      this.handleAttack();
+    }
+
     const { position, facing } = this.sim.hunter;
     this.hunter.setPosition(position.x, position.y);
     this.hunter.setDepth(DEPTH.entity + position.y); // pivot.y sorting
     this.shadow.setPosition(position.x, position.y);
 
-    const tick = DIRECTION_OFFSET[facing];
+    const tick = directionToVector(facing);
     this.facingTick.setPosition(
       tick.x * FACING_TICK_RADIUS,
       -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
@@ -225,7 +227,7 @@ export class BenchmarkScene extends BaseScene {
     this.hound.setPosition(state.position.x, state.position.y);
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
-    const tick = DIRECTION_OFFSET[state.facing];
+    const tick = directionToVector(state.facing);
     this.houndFacingTick.setPosition(
       tick.x * HOUND_TICK_RADIUS,
       -HOUND_BODY_HEIGHT * 0.5 + tick.y * HOUND_TICK_RADIUS,
@@ -465,6 +467,8 @@ export class BenchmarkScene extends BaseScene {
       this.pressedCodes.add(event.code);
       if (event.code === INTERACT_CODE) {
         this.interactQueued = true;
+      } else if (event.code === ATTACK_CODE) {
+        this.attackQueued = true;
       } else if (event.code === RESTART_CODE) {
         this.restartQueued = true;
       }
@@ -490,6 +494,7 @@ export class BenchmarkScene extends BaseScene {
       window.removeEventListener('blur', onBlur);
       this.pressedCodes.clear();
       this.interactQueued = false;
+      this.attackQueued = false;
       this.restartQueued = false;
       this.bus.emit('scene:shutdown', { key: this.scene.key });
     });
@@ -500,7 +505,7 @@ export class BenchmarkScene extends BaseScene {
       .text(
         12,
         GAME_HEIGHT - 22,
-        'WASD / Arrows: move   ·   E: interact   ·   R: restart   ·   greybox benchmark (non-authoritative)',
+        'WASD / Arrows: move   ·   E: interact   ·   Space: attack   ·   R: restart   ·   greybox (non-authoritative)',
         { fontFamily: 'monospace', fontSize: '12px', color: COLORS.accent },
       )
       .setScrollFactor(0)
@@ -527,6 +532,80 @@ export class BenchmarkScene extends BaseScene {
       this.log.info('Benchmark pickup: collected item', resolved.id);
     } else {
       this.log.info('Benchmark interaction: cleared obstruction', resolved.id);
+    }
+  }
+
+  private handleAttack(): void {
+    const result = this.sim.tryAttack();
+    if (!result.swung) {
+      return; // still on cooldown
+    }
+    this.showSwing();
+    if (result.hit) {
+      this.flashHound();
+    }
+    if (result.repelled) {
+      this.showDiscovery('The ruin hound is driven off — the pocket falls quiet.');
+      this.fadeOutHound();
+      this.log.info('Benchmark combat: ruin hound repelled (benchmark stub)');
+    }
+  }
+
+  /** A brief axe-swing arc in front of the Hunter's facing (transient effect). */
+  private showSwing(): void {
+    const { position, facing } = this.sim.hunter;
+    const dir = directionToVector(facing);
+    const reach = BENCHMARK.combat.attackRange;
+    const slash = this.add
+      .ellipse(
+        position.x + dir.x * reach * 0.6,
+        position.y - BODY_HEIGHT * 0.4 + dir.y * reach * 0.6,
+        reach * 0.9,
+        16,
+        BENCHMARK.colors.attack,
+        0.75,
+      )
+      .setRotation(Math.atan2(dir.y, dir.x))
+      .setDepth(DEPTH.effect);
+    this.tweens.add({
+      targets: slash,
+      alpha: 0,
+      scaleX: 1.3,
+      scaleY: 1.3,
+      duration: 160,
+      onComplete: () => slash.destroy(),
+    });
+  }
+
+  /** A quick bright flash on the hound to read a landed hit. */
+  private flashHound(): void {
+    const state = this.sim.hound;
+    if (!state) {
+      return;
+    }
+    const flash = this.add
+      .ellipse(
+        state.position.x,
+        state.position.y - HOUND_BODY_HEIGHT * 0.4,
+        HOUND_BODY_WIDTH,
+        HOUND_BODY_HEIGHT,
+        BENCHMARK.colors.hitFlash,
+        0.85,
+      )
+      .setDepth(DEPTH.effect);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 150,
+      onComplete: () => flash.destroy(),
+    });
+  }
+
+  /** Fades the hound out as it flees (the sim keeps stepping it off-screen). */
+  private fadeOutHound(): void {
+    const targets = [this.hound, this.houndShadow].filter(Boolean) as Phaser.GameObjects.GameObject[];
+    if (targets.length > 0) {
+      this.tweens.add({ targets, alpha: 0, duration: 500 });
     }
   }
 

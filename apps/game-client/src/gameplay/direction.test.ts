@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_FACING, type Direction8, directionFromVector } from './direction';
-import { vec2, ZERO } from './vec2';
+import {
+  DEFAULT_FACING,
+  type Direction8,
+  directionFromVector,
+  directionToVector,
+} from './direction';
+import { length, vec2, ZERO } from './vec2';
 
 // Screen-space convention: +x is east (right), +y is south (down).
 describe('directionFromVector', () => {
@@ -34,5 +39,28 @@ describe('directionFromVector', () => {
 
   it('defaults to facing south', () => {
     expect(DEFAULT_FACING).toBe('s');
+  });
+});
+
+describe('directionToVector', () => {
+  it('returns the expected axis-aligned unit vectors', () => {
+    expect(directionToVector('e')).toEqual({ x: 1, y: 0 });
+    expect(directionToVector('w')).toEqual({ x: -1, y: 0 });
+    expect(directionToVector('n')).toEqual({ x: 0, y: -1 });
+    expect(directionToVector('s')).toEqual({ x: 0, y: 1 });
+  });
+
+  it('returns unit-length vectors for every facing (diagonals included)', () => {
+    const dirs: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    for (const d of dirs) {
+      expect(length(directionToVector(d))).toBeCloseTo(1);
+    }
+  });
+
+  it('round-trips through directionFromVector', () => {
+    const dirs: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    for (const d of dirs) {
+      expect(directionFromVector(directionToVector(d), 's')).toBe(d);
+    }
   });
 });

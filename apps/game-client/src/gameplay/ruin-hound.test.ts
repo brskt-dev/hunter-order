@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createHoundState,
+  houndInAttackReach,
   houndInContact,
   type HoundState,
+  registerHoundHit,
   type RuinHoundConfig,
   stepHound,
 } from './ruin-hound';
@@ -19,6 +21,7 @@ const CONFIG: RuinHoundConfig = {
   deAggroRadius: 200,
   contactRadius: 30,
   arriveEpsilon: 4,
+  hitsToRepel: 2,
 };
 
 // Same behaviour but with a huge aggro radius, so the hound chases across the whole
@@ -42,11 +45,12 @@ const distTo = (state: HoundState, x: number, y: number): number =>
   length({ x: x - state.position.x, y: y - state.position.y });
 
 describe('createHoundState', () => {
-  it('starts at home, patrolling toward the next waypoint', () => {
+  it('starts at home, patrolling toward the next waypoint, unhurt', () => {
     const s = createHoundState(CONFIG);
     expect(s.position).toEqual({ x: 200, y: 200 });
     expect(s.mode).toBe('patrol');
     expect(s.waypointIndex).toBe(1);
+    expect(s.hits).toBe(0);
   });
 });
 
@@ -151,5 +155,65 @@ describe('houndInContact', () => {
     const s = createHoundState(CONFIG); // at (200,200), contactRadius 30
     expect(houndInContact(s, vec2(220, 200), CONFIG)).toBe(true); // dist 20
     expect(houndInContact(s, vec2(240, 200), CONFIG)).toBe(false); // dist 40
+  });
+});
+
+describe('registerHoundHit', () => {
+  it('counts hits but stays engaged until the repel threshold', () => {
+    const chasing: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
+    const once = registerHoundHit(chasing, CONFIG); // hitsToRepel = 2
+    expect(once.hits).toBe(1);
+    expect(once.mode).toBe('chase');
+  });
+
+  it('flees once hits reach the repel threshold', () => {
+    const hurt: HoundState = { ...createHoundState(CONFIG), mode: 'chase', hits: 1 };
+    const repelled = registerHoundHit(hurt, CONFIG);
+    expect(repelled.hits).toBe(2);
+    expect(repelled.mode).toBe('flee');
+  });
+
+  it('does not mutate the input state', () => {
+    const s: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
+    registerHoundHit(s, CONFIG);
+    expect(s.hits).toBe(0);
+    expect(s.mode).toBe('chase');
+  });
+});
+
+describe('stepHound — flee (terminal)', () => {
+  it('moves away from the Hunter and stays fleeing', () => {
+    const fleeing: HoundState = { ...createHoundState(CONFIG), position: vec2(200, 200), mode: 'flee' };
+    // Hunter to the west → the hound should run east (away).
+    const s = stepHound(fleeing, vec2(100, 200), 0.1, openWorld(), CONFIG);
+    expect(s.mode).toBe('flee');
+    expect(s.position.x).toBeGreaterThan(200);
+  });
+
+  it('never re-engages even when the Hunter is adjacent', () => {
+    const fleeing: HoundState = { ...createHoundState(CONFIG), position: vec2(200, 200), mode: 'flee' };
+    const s = stepHound(fleeing, vec2(210, 200), 0.1, openWorld(), CONFIG); // within aggro/contact
+    expect(s.mode).toBe('flee');
+  });
+});
+
+describe('houndInAttackReach', () => {
+  // Hunter at (200,200) facing east; range 52, ~120° arc (arcCos 0.5).
+  const hunter = vec2(200, 200);
+  const east = vec2(1, 0);
+
+  it('connects on a hound within range and inside the facing arc', () => {
+    const s: HoundState = { ...createHoundState(CONFIG), position: vec2(240, 200) }; // dist 40, dead ahead
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(true);
+  });
+
+  it('misses a hound behind the Hunter', () => {
+    const s: HoundState = { ...createHoundState(CONFIG), position: vec2(160, 200) }; // west, behind
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
+  });
+
+  it('misses a hound out of range', () => {
+    const s: HoundState = { ...createHoundState(CONFIG), position: vec2(300, 200) }; // dist 100 > 52
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
   });
 });

@@ -16,7 +16,12 @@
 // ============================================================================
 
 import { resolveMovement } from './collision';
-import { DEFAULT_FACING, type Direction8, directionFromVector } from './direction';
+import {
+  DEFAULT_FACING,
+  type Direction8,
+  directionFromVector,
+  directionToVector,
+} from './direction';
 import {
   activeBlockingRects,
   clearInteractable,
@@ -27,8 +32,10 @@ import { stepPosition } from './movement';
 import { intentFromActions, type MovementAction } from './movement-intent';
 import {
   createHoundState,
+  houndInAttackReach,
   houndInContact,
   type HoundState,
+  registerHoundHit,
   type RuinHoundConfig,
   stepHound,
 } from './ruin-hound';
@@ -60,6 +67,22 @@ export interface HunterSimConfig {
   readonly footprintRadius: number;
   /** Max distance (world units) at which an obstruction can be interacted with. */
   readonly interactRange: number;
+  /** Melee reach (world units) of the hand-axe attack. */
+  readonly attackRange: number;
+  /** Cosine of the attack half-arc (e.g. 0.5 ≈ a 120° cone in front of facing). */
+  readonly attackArcCos: number;
+  /** Minimum time (seconds) between axe swings. */
+  readonly attackCooldownSeconds: number;
+}
+
+/** Outcome of an axe swing (benchmark stub — no damage model). */
+export interface AttackResult {
+  /** The swing actually happened (false when still on cooldown). */
+  readonly swung: boolean;
+  /** The swing connected with the hound. */
+  readonly hit: boolean;
+  /** This hit drove the hound off (transition into flee). */
+  readonly repelled: boolean;
 }
 
 /**
@@ -99,6 +122,7 @@ export class BenchmarkSimulation {
   private currentTarget: Interactable | null = null;
   private collectedList: CollectedItem[] = [];
   private houndState: HoundState | null;
+  private attackCooldown = 0;
 
   constructor(
     private readonly world: TileWorld,
@@ -165,6 +189,7 @@ export class BenchmarkSimulation {
         this.houndConfig,
       );
     }
+    this.attackCooldown = Math.max(0, this.attackCooldown - dtSeconds);
     this.recomputeTarget();
   }
 
@@ -187,11 +212,41 @@ export class BenchmarkSimulation {
     return { ...target, state: 'cleared' };
   }
 
+  /**
+   * Swings the hand axe (benchmark stub — no damage model). Off cooldown, the
+   * swing connects when the hound is within `attackRange` and the facing arc; the
+   * `hitsToRepel`-th hit drives the hound off (transition to flee).
+   */
+  tryAttack(): AttackResult {
+    if (this.attackCooldown > 0) {
+      return { swung: false, hit: false, repelled: false };
+    }
+    this.attackCooldown = this.config.attackCooldownSeconds;
+
+    if (!this.houndState || !this.houndConfig || this.houndState.mode === 'flee') {
+      return { swung: true, hit: false, repelled: false };
+    }
+    const facing = directionToVector(this.state.facing);
+    const inReach = houndInAttackReach(
+      this.houndState,
+      this.state.position,
+      facing,
+      this.config.attackRange,
+      this.config.attackArcCos,
+    );
+    if (!inReach) {
+      return { swung: true, hit: false, repelled: false };
+    }
+    this.houndState = registerHoundHit(this.houndState, this.houndConfig);
+    return { swung: true, hit: true, repelled: this.houndState.mode === 'flee' };
+  }
+
   reset(): void {
     this.interactableList = this.seed.map((it) => ({ ...it }));
     this.collectedList = [];
     this.state = BenchmarkSimulation.spawnState(this.world);
     this.houndState = this.houndConfig ? createHoundState(this.houndConfig) : null;
+    this.attackCooldown = 0;
     this.recomputeTarget();
   }
 

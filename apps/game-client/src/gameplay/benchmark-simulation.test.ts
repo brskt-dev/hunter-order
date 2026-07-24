@@ -7,7 +7,14 @@ import { type RuinHoundConfig } from './ruin-hound';
 import { length, vec2 } from './vec2';
 import { createTileWorld, type TileWorld } from './world';
 
-const CONFIG: HunterSimConfig = { speed: 140, footprintRadius: 16, interactRange: 40 };
+const CONFIG: HunterSimConfig = {
+  speed: 140,
+  footprintRadius: 16,
+  interactRange: 40,
+  attackRange: 60,
+  attackArcCos: 0.5,
+  attackCooldownSeconds: 0.35,
+};
 
 // An overgrowth obstruction just east of the open-world spawn (x=264): its left
 // face is at x=336, so a radius-16 footprint is blocked at x=320.
@@ -247,6 +254,7 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     deAggroRadius: 260,
     contactRadius: 40,
     arriveEpsilon: 6,
+    hitsToRepel: 2,
   });
 
   const withHound = (): BenchmarkSimulation =>
@@ -296,5 +304,64 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     expect(sim.hound?.mode).toBe('patrol');
     expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
     expect(sim.threatEngaged).toBe(false);
+  });
+});
+
+describe('BenchmarkSimulation — axe attack (offense stub)', () => {
+  // A stationary hound due east of spawn, always aggroed — lets us face it and
+  // swing deterministically without a moving-target chase.
+  const staticHound = (): RuinHoundConfig => ({
+    speed: 0,
+    footprintRadius: 20,
+    waypoints: [vec2(320, 264)],
+    aggroRadius: 500,
+    deAggroRadius: 1000,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+    hitsToRepel: 2,
+  });
+
+  it('swings but misses when nothing is in reach', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG); // no hound
+    const r = sim.tryAttack();
+    expect(r.swung).toBe(true);
+    expect(r.hit).toBe(false);
+    expect(r.repelled).toBe(false);
+  });
+
+  it('does not connect a second time while on cooldown', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    sim.update(set('move-east'), 1 / 60); // face east toward the hound, within reach
+    expect(sim.tryAttack().hit).toBe(true);
+    expect(sim.tryAttack().swung).toBe(false); // still cooling down
+  });
+
+  it('drives the hound off (flee) after enough hits in reach', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    sim.update(set('move-east'), 1 / 60); // face east toward the hound
+    let repelled = false;
+    for (let i = 0; i < 300 && !repelled; i += 1) {
+      if (sim.tryAttack().repelled) {
+        repelled = true;
+      }
+      sim.update(noActions, 1 / 60); // hold facing, advance the attack cooldown
+    }
+    expect(repelled).toBe(true);
+    expect(sim.hound?.mode).toBe('flee');
+    expect(sim.threatEngaged).toBe(false);
+  });
+
+  it('reset clears combat so the hound can be fought again', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    sim.update(set('move-east'), 1 / 60);
+    for (let i = 0; i < 300 && sim.hound?.mode !== 'flee'; i += 1) {
+      sim.tryAttack();
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.hound?.mode).toBe('flee');
+    sim.reset();
+    expect(sim.hound?.mode).toBe('patrol');
+    expect(sim.hound?.hits).toBe(0);
+    expect(sim.tryAttack().swung).toBe(true); // cooldown was reset
   });
 });
