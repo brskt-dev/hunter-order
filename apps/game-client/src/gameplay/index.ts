@@ -4,6 +4,7 @@
 // layer composes these behind a thin Phaser adapter.
 
 export {
+  type AttackResult,
   BenchmarkSimulation,
   type CollectedItem,
   type HunterSimConfig,
@@ -14,7 +15,7 @@ export { lookAheadTarget, smoothTowards } from './camera';
 export type { Rect } from './collision';
 export { resolveMovement } from './collision';
 export type { Direction8 } from './direction';
-export { DEFAULT_FACING, directionFromVector } from './direction';
+export { DEFAULT_FACING, directionFromVector, directionToVector } from './direction';
 export {
   activeBlockingRects,
   clearInteractable,
@@ -29,9 +30,11 @@ export type { MovementAction } from './movement-intent';
 export { intentFromActions } from './movement-intent';
 export {
   createHoundState,
+  houndInAttackReach,
   houndInContact,
   type HoundMode,
   type HoundState,
+  registerHoundHit,
   type RuinHoundConfig,
   stepHound,
 } from './ruin-hound';

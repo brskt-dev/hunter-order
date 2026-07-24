@@ -85,4 +85,12 @@ describe('benchmark config', () => {
     expect(BENCHMARK.hound.deAggroRadius).toBeGreaterThan(BENCHMARK.hound.aggroRadius);
     expect(BENCHMARK.hound.contactRadius).toBeGreaterThan(0);
   });
+
+  it('has sane hand-axe / repel tunables', () => {
+    expect(BENCHMARK.hound.hitsToRepel).toBeGreaterThan(0);
+    expect(BENCHMARK.combat.attackRange).toBeGreaterThan(0);
+    expect(BENCHMARK.combat.attackCooldownSeconds).toBeGreaterThan(0);
+    expect(BENCHMARK.combat.attackArcCos).toBeGreaterThanOrEqual(-1);
+    expect(BENCHMARK.combat.attackArcCos).toBeLessThanOrEqual(1);
+  });
 });
