@@ -4,6 +4,7 @@ import {
   BenchmarkSimulation,
   clampDeltaSeconds,
   createTileWorld,
+  directionalFrameKey,
   directionToVector,
   intentFromActions,
   type Interactable,
@@ -17,6 +18,13 @@ import {
   ZERO,
 } from '@gameplay';
 import Phaser from 'phaser';
+
+import {
+  BENCHMARK_ART_FRAMES,
+  FRAGMENT_TEXTURE,
+  HOUND_ART,
+  HOUND_IDLE_BASE,
+} from './benchmark-assets';
 
 /**
  * First-playable-loop greybox — the "Overgrown Ruin" benchmark scene.
@@ -101,10 +109,14 @@ export class BenchmarkScene extends BaseScene {
   private facingTick!: Phaser.GameObjects.Rectangle;
   private prompt?: Phaser.GameObjects.Text;
   private satchel?: Phaser.GameObjects.Text;
-  private readonly interactableViews = new Map<string, Phaser.GameObjects.Shape>();
+  private readonly interactableViews = new Map<
+    string,
+    Phaser.GameObjects.Image | Phaser.GameObjects.Shape
+  >();
   private hound?: Phaser.GameObjects.Container;
   private houndShadow?: Phaser.GameObjects.Ellipse;
   private houndFacingTick?: Phaser.GameObjects.Rectangle;
+  private houndImage?: Phaser.GameObjects.Image;
   private dangerOverlay?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
@@ -116,6 +128,14 @@ export class BenchmarkScene extends BaseScene {
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
+  }
+
+  preload(): void {
+    // Load the review-status real-art frames. A missing/failed load simply leaves
+    // the texture absent, and the scene falls back to the greybox primitive.
+    for (const frame of BENCHMARK_ART_FRAMES) {
+      this.load.image(frame.key, frame.url);
+    }
   }
 
   create(): void {
@@ -218,20 +238,25 @@ export class BenchmarkScene extends BaseScene {
     this.updateCombatCamera(intentFromActions(actions), dt);
   }
 
-  /** Mirrors the hound's logical state onto its placeholder (body/shadow/facing). */
+  /** Mirrors the hound's logical state onto its sprite/primitive + shadow. */
   private renderHound(): void {
     const state = this.sim.hound;
-    if (!state || !this.hound || !this.houndShadow || !this.houndFacingTick) {
+    if (!state || !this.hound || !this.houndShadow) {
       return;
     }
     this.hound.setPosition(state.position.x, state.position.y);
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
-    const tick = directionToVector(state.facing);
-    this.houndFacingTick.setPosition(
-      tick.x * HOUND_TICK_RADIUS,
-      -HOUND_BODY_HEIGHT * 0.5 + tick.y * HOUND_TICK_RADIUS,
-    );
+
+    if (this.houndImage) {
+      this.houndImage.setTexture(directionalFrameKey(HOUND_IDLE_BASE, state.facing));
+    } else if (this.houndFacingTick) {
+      const tick = directionToVector(state.facing);
+      this.houndFacingTick.setPosition(
+        tick.x * HOUND_TICK_RADIUS,
+        -HOUND_BODY_HEIGHT * 0.5 + tick.y * HOUND_TICK_RADIUS,
+      );
+    }
   }
 
   /**
@@ -324,14 +349,17 @@ export class BenchmarkScene extends BaseScene {
   }
 
   /**
-   * A discreet ground item on the item-drop layer: a small weathered shard
-   * (rotated square) with a faint accent stroke — readable as interactable
-   * without glow or loot-style emphasis. No baked shadow (per the item spec).
+   * A discreet ground item on the item-drop layer. Uses the real fragment sprite
+   * when its texture loaded; otherwise a small weathered shard primitive (rotated
+   * square + accent stroke). No baked shadow (per the item spec).
    */
-  private drawFragment(it: Interactable): Phaser.GameObjects.Shape {
-    const { colors } = BENCHMARK;
+  private drawFragment(it: Interactable): Phaser.GameObjects.Image | Phaser.GameObjects.Shape {
     const cx = it.bounds.x + it.bounds.width / 2;
     const cy = it.bounds.y + it.bounds.height / 2;
+    if (this.textures.exists(FRAGMENT_TEXTURE)) {
+      return this.add.image(cx, cy, FRAGMENT_TEXTURE).setDepth(DEPTH.itemDrop);
+    }
+    const { colors } = BENCHMARK;
     return this.add
       .rectangle(cx, cy, 18, 18, colors.fragment)
       .setAngle(45)
@@ -372,7 +400,16 @@ export class BenchmarkScene extends BaseScene {
       .setDepth(DEPTH.entity + spawn.y);
   }
 
-  /** The ruin-hound placeholder: wide body + separate runtime shadow + nose tick. */
+  /** True when the real ruin-hound idle art loaded (else render the primitive). */
+  private houndArtReady(): boolean {
+    return this.textures.exists(directionalFrameKey(HOUND_IDLE_BASE, 's'));
+  }
+
+  /**
+   * The ruin hound: a separate runtime shadow + a body inside a depth-sorted
+   * container. The body is the real directional sprite when its art loaded,
+   * otherwise the greybox wide-rectangle + nose tick.
+   */
   private createHound(): void {
     const state = this.sim.hound;
     if (!state) {
@@ -380,6 +417,8 @@ export class BenchmarkScene extends BaseScene {
     }
     const { colors, hound } = BENCHMARK;
     const { position } = state;
+    this.houndImage = undefined;
+    this.houndFacingTick = undefined;
 
     this.houndShadow = this.add
       .ellipse(
@@ -392,19 +431,29 @@ export class BenchmarkScene extends BaseScene {
       )
       .setDepth(DEPTH.shadow);
 
-    const body = this.add
-      .rectangle(0, -HOUND_BODY_HEIGHT / 2, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hound)
-      .setStrokeStyle(2, colors.houndStroke);
-    this.houndFacingTick = this.add.rectangle(
-      0,
-      -HOUND_BODY_HEIGHT / 2,
-      HOUND_TICK_SIZE,
-      HOUND_TICK_SIZE,
-      colors.houndStroke,
-    );
+    let children: Phaser.GameObjects.GameObject[];
+    if (this.houndArtReady()) {
+      // Real sprite; feet-pivot aligned to the container origin (logical position).
+      this.houndImage = this.add
+        .image(0, 0, directionalFrameKey(HOUND_IDLE_BASE, state.facing))
+        .setOrigin(0.5, HOUND_ART.pivotY / HOUND_ART.canvas.height);
+      children = [this.houndImage];
+    } else {
+      const body = this.add
+        .rectangle(0, -HOUND_BODY_HEIGHT / 2, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hound)
+        .setStrokeStyle(2, colors.houndStroke);
+      this.houndFacingTick = this.add.rectangle(
+        0,
+        -HOUND_BODY_HEIGHT / 2,
+        HOUND_TICK_SIZE,
+        HOUND_TICK_SIZE,
+        colors.houndStroke,
+      );
+      children = [body, this.houndFacingTick];
+    }
 
     this.hound = this.add
-      .container(position.x, position.y, [body, this.houndFacingTick])
+      .container(position.x, position.y, children)
       .setDepth(DEPTH.entity + position.y);
   }
 

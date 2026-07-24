@@ -17,6 +17,8 @@ export function createGameConfig(
     type: Phaser.AUTO,
     parent,
     backgroundColor: COLORS.background,
+    // Crisp pixel art: nearest-neighbor filtering, no antialiasing (GD-0005 #6).
+    pixelArt: true,
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
