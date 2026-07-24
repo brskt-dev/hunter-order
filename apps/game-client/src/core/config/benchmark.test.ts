@@ -40,4 +40,30 @@ describe('benchmark config', () => {
       expect(value).toBeLessThanOrEqual(0xffffff);
     }
   });
+
+  it('keeps every interactable inside the grid and out of solids', () => {
+    for (const it of BENCHMARK.interactables) {
+      const { col, row, cols, rows } = it.tile;
+      expect(col).toBeGreaterThanOrEqual(0);
+      expect(row).toBeGreaterThanOrEqual(0);
+      expect(col + cols).toBeLessThanOrEqual(BENCHMARK.world.cols);
+      expect(row + rows).toBeLessThanOrEqual(BENCHMARK.world.rows);
+
+      const overlapsSolid = BENCHMARK.solidTiles.some(
+        (s) =>
+          col < s.col + s.cols &&
+          col + cols > s.col &&
+          row < s.row + s.rows &&
+          row + rows > s.row,
+      );
+      expect(overlapsSolid).toBe(false);
+    }
+  });
+
+  it('makes the ancient fragment a non-blocking collectible (items never block movement)', () => {
+    const fragment = BENCHMARK.interactables.find((it) => it.kind === 'fragment');
+    expect(fragment).toBeDefined();
+    expect(fragment?.collectible).toBe(true);
+    expect(fragment?.blocksWhileActive).toBe(false);
+  });
 });

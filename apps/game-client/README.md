@@ -3,9 +3,10 @@
 Browser game client for Hunter Order. It contains the **client infrastructure**
 (rendering stack, application architecture) and the **first playable-loop
 greybox** — a benchmark-only, non-authoritative vertical slice with continuous
-movement, static collision, an exploration camera and a first environmental
-interaction. Final combat, item pickup, inventory, AI, networking, persistence,
-HUD and production art are **not** implemented yet.
+movement, static collision, an exploration camera, a first environmental
+interaction and a first item discovery/pickup. Final combat, a full inventory,
+item identification, AI, networking, persistence, HUD and production art are
+**not** implemented yet.
 
 ## Stack
 
@@ -82,14 +83,18 @@ stop/turn; circular-footprint collision against solids and world bounds with
 wall sliding; an exploration camera that follows with smooth, direction-based
 look-ahead and stays within world bounds. A blocking **overgrowth obstruction**
 can be cleared with the axe: a contextual `[E] Cut` prompt appears only when the
-Hunter is in range, and clearing it opens the passage. `R` restarts the scene;
-losing window focus releases held keys.
+Hunter is in range, and clearing it opens the passage. A discreet **unidentified
+ancient fragment** rests in the ruin's broken interior on the item-drop layer: a
+contextual `[E] Pick up · Unknown fragment` prompt appears in range, and
+collecting it removes the item from the world, shows a brief discovery line, and
+records it in a minimal satchel / pickup-log placeholder (not a full inventory).
+`R` restarts the scene; losing window focus releases held keys.
 
-| Input                        | Action                                       |
-| ---------------------------- | -------------------------------------------- |
-| `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable)          |
-| `E`                          | Interact with the obstruction in range (cut) |
-| `R`                          | Restart the scene                            |
+| Input                        | Action                                            |
+| ---------------------------- | ------------------------------------------------- |
+| `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable)               |
+| `E`                          | Interact in range: cut the obstruction / pick up the fragment |
+| `R`                          | Restart the scene                                 |
 
 Controls are read by physical key position (`event.code`) from a capture-phase
 `window` listener, so they are keyboard-layout independent and are received
@@ -113,14 +118,15 @@ centralized in
 [`src/core/config/benchmark.ts`](./src/core/config/benchmark.ts) and marked
 temporary — not an approved game rule.
 
-**Not yet implemented:** item pickup, the ruin-hound threat, combat, the combat
-camera, loop-completion feedback, and all production art. These are the next
-increments.
+**Not yet implemented:** the ruin-hound threat, combat, the combat camera,
+loop-completion feedback, a full inventory / item identification, and all
+production art. These are the next increments.
 
 Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
 `http://localhost:5173`, wait for the greybox, then walk the Hunter with WASD /
 arrows — bump into and slide along the ruin walls, feel the camera lead your
-movement, and press `R` to restart.
+movement, head into the ruin's interior to find the ancient fragment and press
+`E` to pick it up (watch the satchel line appear), and press `R` to restart.
 
 ## Environment
 

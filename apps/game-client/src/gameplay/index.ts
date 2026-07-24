@@ -5,6 +5,7 @@
 
 export {
   BenchmarkSimulation,
+  type CollectedItem,
   type HunterSimConfig,
   type HunterState,
   stepHunter,

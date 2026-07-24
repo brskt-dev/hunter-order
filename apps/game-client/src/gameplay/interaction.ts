@@ -18,6 +18,12 @@ export interface Interactable {
   readonly bounds: Rect;
   /** Whether it blocks movement while still active. */
   readonly blocksWhileActive: boolean;
+  /**
+   * Whether interacting collects it into the Hunter's possession (a pickup item
+   * such as the ancient fragment) rather than merely clearing it (an obstruction
+   * such as overgrowth). Optional; absent means "not a collectible".
+   */
+  readonly collectible?: boolean;
   readonly state: InteractableState;
 }
 

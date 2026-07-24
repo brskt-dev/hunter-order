@@ -1,4 +1,4 @@
-import { BENCHMARK, COLORS, GAME_HEIGHT } from '@core/config';
+import { BENCHMARK, COLORS, GAME_HEIGHT, GAME_WIDTH } from '@core/config';
 import { BaseScene, SceneKeys } from '@core/scenes';
 import {
   BenchmarkSimulation,
@@ -42,11 +42,12 @@ import Phaser from 'phaser';
  */
 
 // Render layer depths, following the approved layer stack (asset-specification):
-// ground / ground-decal / low-object / shadow / entity-body / world-ui.
+// ground / ground-decal / low-object / item-drop / shadow / entity-body / world-ui.
 const DEPTH = {
   ground: 0,
   groundDecal: 10,
   lowObject: 100,
+  itemDrop: 150, // ground items sit above low objects but below the Hunter/shadow
   shadow: 200,
   entity: 1000, // + pivot.y so entities sort front-to-back by their feet
   worldUi: 90_000,
@@ -76,7 +77,13 @@ const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
 };
 
 // Contextual prompt verb per interactable kind (benchmark placeholder).
-const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut' };
+const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut', fragment: 'Pick up' };
+// Item name shown alongside the verb for pickup items (contextual UI, not lore).
+const ITEM_LABEL: Record<string, string> = { fragment: 'Unknown fragment' };
+// Restrained, temporary discovery line shown on pickup ("a trace, not a burst").
+const DISCOVERY_MESSAGE: Record<string, string> = {
+  fragment: 'You found an unidentified ancient fragment.',
+};
 const cssHex = (value: number): string => `#${value.toString(16).padStart(6, '0')}`;
 
 export class BenchmarkScene extends BaseScene {
@@ -86,7 +93,8 @@ export class BenchmarkScene extends BaseScene {
   private shadow!: Phaser.GameObjects.Ellipse;
   private facingTick!: Phaser.GameObjects.Rectangle;
   private prompt?: Phaser.GameObjects.Text;
-  private readonly interactableViews = new Map<string, Phaser.GameObjects.Rectangle>();
+  private satchel?: Phaser.GameObjects.Text;
+  private readonly interactableViews = new Map<string, Phaser.GameObjects.Shape>();
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
   private restartQueued = false;
@@ -127,6 +135,7 @@ export class BenchmarkScene extends BaseScene {
     this.setupCamera();
     this.setupInput();
     this.addHint();
+    this.createSatchel();
   }
 
   override update(_time: number, delta: number): void {
@@ -179,6 +188,7 @@ export class BenchmarkScene extends BaseScene {
         height: it.tile.rows * ts,
       },
       blocksWhileActive: it.blocksWhileActive,
+      collectible: it.collectible,
       state: 'active' as const,
     }));
   }
@@ -219,6 +229,10 @@ export class BenchmarkScene extends BaseScene {
   private drawInteractables(interactables: readonly Interactable[]): void {
     const { colors } = BENCHMARK;
     for (const it of interactables) {
+      if (it.collectible) {
+        this.interactableViews.set(it.id, this.drawFragment(it));
+        continue;
+      }
       const view = this.add
         .rectangle(it.bounds.x, it.bounds.y, it.bounds.width, it.bounds.height, colors.overgrowth)
         .setOrigin(0, 0)
@@ -226,6 +240,22 @@ export class BenchmarkScene extends BaseScene {
         .setDepth(DEPTH.lowObject + 1);
       this.interactableViews.set(it.id, view);
     }
+  }
+
+  /**
+   * A discreet ground item on the item-drop layer: a small weathered shard
+   * (rotated square) with a faint accent stroke — readable as interactable
+   * without glow or loot-style emphasis. No baked shadow (per the item spec).
+   */
+  private drawFragment(it: Interactable): Phaser.GameObjects.Shape {
+    const { colors } = BENCHMARK;
+    const cx = it.bounds.x + it.bounds.width / 2;
+    const cy = it.bounds.y + it.bounds.height / 2;
+    return this.add
+      .rectangle(cx, cy, 18, 18, colors.fragment)
+      .setAngle(45)
+      .setStrokeStyle(2, colors.fragmentAccent)
+      .setDepth(DEPTH.itemDrop);
   }
 
   private createHunter(): void {
@@ -272,6 +302,21 @@ export class BenchmarkScene extends BaseScene {
       })
       .setOrigin(0.5, 1)
       .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+  }
+
+  // Minimal possession / pickup-log placeholder (NOT an inventory panel): a single
+  // unobtrusive line that stays hidden until the first item is collected, keeping
+  // the default UI clean per the benchmark's contextual-UI rule.
+  private createSatchel(): void {
+    this.satchel = this.add
+      .text(12, GAME_HEIGHT - 40, '', {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: cssHex(BENCHMARK.colors.fragmentAccent),
+      })
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui)
       .setVisible(false);
   }
 
@@ -330,11 +375,11 @@ export class BenchmarkScene extends BaseScene {
   }
 
   private handleInteract(): void {
-    const cleared = this.sim.tryInteract();
-    if (!cleared) {
+    const resolved = this.sim.tryInteract();
+    if (!resolved) {
       return;
     }
-    const view = this.interactableViews.get(cleared.id);
+    const view = this.interactableViews.get(resolved.id);
     if (view) {
       this.tweens.add({
         targets: view,
@@ -343,7 +388,54 @@ export class BenchmarkScene extends BaseScene {
         onComplete: () => view.setVisible(false),
       });
     }
-    this.log.info('Benchmark interaction: cleared obstruction', cleared.id);
+    if (resolved.collectible) {
+      this.showDiscovery(DISCOVERY_MESSAGE[resolved.kind] ?? 'You found something.');
+      this.updatePossession();
+      this.log.info('Benchmark pickup: collected item', resolved.id);
+    } else {
+      this.log.info('Benchmark interaction: cleared obstruction', resolved.id);
+    }
+  }
+
+  /** Brief, self-fading discovery line near the top of the screen. */
+  private showDiscovery(text: string): void {
+    const message = this.add
+      .text(GAME_WIDTH / 2, 64, text, {
+        fontFamily: 'monospace',
+        fontSize: '15px',
+        color: cssHex(BENCHMARK.colors.prompt),
+        backgroundColor: 'rgba(12,15,12,0.82)',
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui);
+    this.tweens.add({
+      targets: message,
+      alpha: { from: 1, to: 0 },
+      delay: 1200,
+      duration: 700,
+      onComplete: () => message.destroy(),
+    });
+  }
+
+  /** Refreshes the satchel line from the simulation's pickup log. */
+  private updatePossession(): void {
+    if (!this.satchel) {
+      return;
+    }
+    const counts = new Map<string, number>();
+    for (const item of this.sim.collected) {
+      counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+    }
+    if (counts.size === 0) {
+      this.satchel.setVisible(false);
+      return;
+    }
+    const parts = [...counts].map(
+      ([kind, count]) => `${ITEM_LABEL[kind] ?? kind} ×${count}`,
+    );
+    this.satchel.setText(`Satchel: ${parts.join(', ')}`).setVisible(true);
   }
 
   private updatePrompt(): void {
@@ -355,10 +447,15 @@ export class BenchmarkScene extends BaseScene {
       this.prompt.setVisible(false);
       return;
     }
-    const label = INTERACT_LABEL[target.kind] ?? 'Use';
+    const verb = INTERACT_LABEL[target.kind] ?? 'Use';
+    const name = ITEM_LABEL[target.kind];
+    const { bounds } = target;
+    // Float just above the small ground marker for a pickup; above the top edge
+    // for a full-tile obstruction.
+    const anchorY = target.collectible ? bounds.y + bounds.height / 2 - 16 : bounds.y - 8;
     this.prompt
-      .setText(`[E] ${label}`)
-      .setPosition(target.bounds.x + target.bounds.width / 2, target.bounds.y - 8)
+      .setText(name ? `[E] ${verb} · ${name}` : `[E] ${verb}`)
+      .setPosition(bounds.x + bounds.width / 2, anchorY)
       .setVisible(true);
   }
 }

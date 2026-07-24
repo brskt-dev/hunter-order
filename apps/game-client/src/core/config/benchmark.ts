@@ -75,8 +75,12 @@ export const BENCHMARK = {
   interaction: { range: 44 },
 
   /**
-   * Environmental obstructions the Hunter can clear with the axe. Placeholder
-   * greybox content: blocks movement while active, opens passage once cleared.
+   * Things the Hunter can act on at range. Placeholder greybox content:
+   *   - `overgrowth` obstructions block movement while active and open the
+   *     passage once cut (collectible: false);
+   *   - the `fragment` is a discreet pickup item (the unidentified ancient
+   *     fragment) that never blocks movement and is collected on interact.
+   * Placement is a hand-authored greybox composition, not a world rule.
    */
   interactables: [
     {
@@ -84,6 +88,16 @@ export const BENCHMARK = {
       kind: 'overgrowth',
       tile: { col: 9, row: 3, cols: 1, rows: 4 },
       blocksWhileActive: true,
+      collectible: false,
+    },
+    {
+      // Rests in the ruin's broken interior (inside the L-shaped wall), so it is
+      // found by exploring inward — visible but not loud, per the benchmark doc.
+      id: 'ancient-fragment',
+      kind: 'fragment',
+      tile: { col: 17, row: 12, cols: 1, rows: 1 },
+      blocksWhileActive: false,
+      collectible: true,
     },
   ],
 
@@ -99,6 +113,10 @@ export const BENCHMARK = {
     footprint: 0x171717,
     overgrowth: 0x4a7a3f,
     overgrowthStroke: 0x6fae5f,
+    // Ancient fragment: weathered stone/metal, moss/dirt-toned, subtly accented
+    // (no glow). Reads as interactable on the ground without shouting "loot".
+    fragment: 0x8a8672,
+    fragmentAccent: 0xc9b88a,
     prompt: 0xf4f4ec,
   },
 } as const;

@@ -18,6 +18,18 @@ const overgrowth = (): Interactable => ({
   state: 'active',
 });
 
+// A pickup item (the unidentified ancient fragment) just east of spawn. Unlike an
+// obstruction it does NOT block movement and, when interacted with, is collected
+// into the possession log rather than merely cleared.
+const fragment = (): Interactable => ({
+  id: 'fragment',
+  kind: 'fragment',
+  bounds: { x: 336, y: 240, width: 48, height: 48 },
+  blocksWhileActive: false,
+  collectible: true,
+  state: 'active',
+});
+
 const openWorld = (): TileWorld =>
   createTileWorld({
     cols: 20,
@@ -156,5 +168,70 @@ describe('BenchmarkSimulation — environmental interaction', () => {
     sim.reset();
     expect(sim.interactables.find((i) => i.id === 'roots')?.state).toBe('active');
     expect(sim.target).toBeNull();
+  });
+});
+
+describe('BenchmarkSimulation — item pickup / possession log', () => {
+  // Steps east until the given interactable is the in-range target (or gives up),
+  // so we can pick it up before the (non-blocking) Hunter walks past it.
+  const moveEastUntilTarget = (sim: BenchmarkSimulation, id: string): void => {
+    for (let i = 0; i < 200; i += 1) {
+      if (sim.target?.id === id) {
+        return;
+      }
+      sim.update(set('move-east'), 1 / 60);
+    }
+  };
+
+  it('has an empty possession log at spawn', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    expect(sim.collected).toEqual([]);
+  });
+
+  it('does not block movement (the Hunter walks over a collectible)', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    for (let i = 0; i < 200; i += 1) {
+      sim.update(set('move-east'), 1 / 60);
+    }
+    // A blocking obstruction with a left face at x=336 would stop a radius-16
+    // footprint at x=320; a collectible must let the Hunter pass through it.
+    expect(sim.hunter.position.x).toBeGreaterThan(336);
+  });
+
+  it('records the item in the possession log when picked up', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    moveEastUntilTarget(sim, 'fragment');
+    expect(sim.target?.id).toBe('fragment');
+
+    const picked = sim.tryInteract();
+    expect(picked?.id).toBe('fragment');
+    expect(sim.collected).toEqual([{ id: 'fragment', kind: 'fragment' }]);
+    // The item is gone from the world after pickup.
+    expect(sim.interactables.find((i) => i.id === 'fragment')?.state).toBe('cleared');
+    expect(sim.target).toBeNull();
+  });
+
+  it('does not record possession when clearing a non-collectible obstruction', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    moveEastUntilTarget(sim, 'roots');
+    sim.tryInteract();
+    expect(sim.collected).toEqual([]);
+  });
+
+  it('pickup is single-fire (no duplicate possession record)', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    moveEastUntilTarget(sim, 'fragment');
+    expect(sim.tryInteract()?.id).toBe('fragment');
+    expect(sim.tryInteract()).toBeNull();
+    expect(sim.collected).toHaveLength(1);
+  });
+
+  it('reset empties the possession log and restores the item', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    moveEastUntilTarget(sim, 'fragment');
+    sim.tryInteract();
+    sim.reset();
+    expect(sim.collected).toEqual([]);
+    expect(sim.interactables.find((i) => i.id === 'fragment')?.state).toBe('active');
   });
 });
