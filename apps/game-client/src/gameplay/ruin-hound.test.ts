@@ -1,0 +1,155 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  createHoundState,
+  houndInContact,
+  type HoundState,
+  type RuinHoundConfig,
+  stepHound,
+} from './ruin-hound';
+import { length, vec2 } from './vec2';
+import { createTileWorld, type TileWorld } from './world';
+
+// Home at (200,200), a second patrol point at (400,200): the hound paces east/west.
+const CONFIG: RuinHoundConfig = {
+  speed: 100,
+  footprintRadius: 20,
+  waypoints: [vec2(200, 200), vec2(400, 200)],
+  aggroRadius: 100,
+  deAggroRadius: 200,
+  contactRadius: 30,
+  arriveEpsilon: 4,
+};
+
+// Same behaviour but with a huge aggro radius, so the hound chases across the whole
+// map — used to exercise collision/bounds while chasing.
+const FAR_AGGRO: RuinHoundConfig = { ...CONFIG, aggroRadius: 5000, deAggroRadius: 6000 };
+
+const openWorld = (): TileWorld =>
+  createTileWorld({ cols: 20, rows: 20, tileSize: 48, spawnTile: { col: 5, row: 5 }, solidTiles: [] });
+
+// A vertical wall spanning x∈[384,432].
+const walledWorld = (): TileWorld =>
+  createTileWorld({
+    cols: 20,
+    rows: 20,
+    tileSize: 48,
+    spawnTile: { col: 1, row: 1 },
+    solidTiles: [{ col: 8, row: 0, cols: 1, rows: 20 }],
+  });
+
+const distTo = (state: HoundState, x: number, y: number): number =>
+  length({ x: x - state.position.x, y: y - state.position.y });
+
+describe('createHoundState', () => {
+  it('starts at home, patrolling toward the next waypoint', () => {
+    const s = createHoundState(CONFIG);
+    expect(s.position).toEqual({ x: 200, y: 200 });
+    expect(s.mode).toBe('patrol');
+    expect(s.waypointIndex).toBe(1);
+  });
+});
+
+describe('stepHound — patrol', () => {
+  it('moves toward the next patrol waypoint when the Hunter is far', () => {
+    const s = stepHound(createHoundState(CONFIG), vec2(1000, 1000), 0.1, openWorld(), CONFIG);
+    expect(s.mode).toBe('patrol');
+    expect(s.position.x).toBeGreaterThan(200);
+    expect(s.position.y).toBeCloseTo(200);
+    expect(s.facing).toBe('e');
+  });
+
+  it('reverses direction at a waypoint (ping-pong patrol)', () => {
+    let s = createHoundState(CONFIG);
+    const world = openWorld();
+    let maxX = s.position.x;
+    let reversed = false;
+    for (let i = 0; i < 80; i += 1) {
+      s = stepHound(s, vec2(1000, 1000), 0.1, world, CONFIG);
+      maxX = Math.max(maxX, s.position.x);
+      if (maxX > 396 && s.position.x < maxX - 5) {
+        reversed = true;
+      }
+    }
+    expect(maxX).toBeGreaterThan(396); // reached the far waypoint (~400)
+    expect(reversed).toBe(true); // then headed back home
+    expect(s.mode).toBe('patrol');
+  });
+});
+
+describe('stepHound — aggro / chase with hysteresis', () => {
+  it('enters chase when the Hunter comes within the aggro radius', () => {
+    const s = stepHound(createHoundState(CONFIG), vec2(250, 200), 0.1, openWorld(), CONFIG);
+    expect(s.mode).toBe('chase');
+    expect(s.position.x).toBeGreaterThan(200); // stepping toward the Hunter
+  });
+
+  it('does NOT chase a Hunter between the aggro and de-aggro radii while patrolling', () => {
+    // dist 150: > aggro (100), < de-aggro (200) → stays patrol.
+    const s = stepHound(createHoundState(CONFIG), vec2(350, 200), 0.1, openWorld(), CONFIG);
+    expect(s.mode).toBe('patrol');
+  });
+
+  it('keeps chasing until the Hunter passes the (larger) de-aggro radius', () => {
+    const chasing: HoundState = { ...createHoundState(CONFIG), position: vec2(300, 200), mode: 'chase' };
+    // dist 150 (< de-aggro 200) → still chasing.
+    expect(stepHound(chasing, vec2(450, 200), 0.1, openWorld(), CONFIG).mode).toBe('chase');
+    // dist 300 (≥ de-aggro 200) → give up and return.
+    expect(stepHound(chasing, vec2(600, 200), 0.1, openWorld(), CONFIG).mode).toBe('return');
+  });
+
+  it('closes distance to the Hunter while chasing', () => {
+    let s: HoundState = createHoundState(CONFIG);
+    const world = openWorld();
+    const before = distTo(s, 290, 200);
+    for (let i = 0; i < 8; i += 1) {
+      s = stepHound(s, vec2(290, 200), 0.1, world, CONFIG);
+    }
+    expect(distTo(s, 290, 200)).toBeLessThan(before);
+    expect(s.mode).toBe('chase');
+  });
+});
+
+describe('stepHound — return then resume patrol', () => {
+  it('resumes patrol once it gets home', () => {
+    const returning: HoundState = { ...createHoundState(CONFIG), position: vec2(202, 200), mode: 'return' };
+    const s = stepHound(returning, vec2(2000, 2000), 0.1, openWorld(), CONFIG);
+    expect(s.mode).toBe('patrol');
+  });
+});
+
+describe('stepHound — collision and bounds', () => {
+  it('does not chase through a solid wall', () => {
+    let s: HoundState = createHoundState(FAR_AGGRO);
+    const world = walledWorld();
+    for (let i = 0; i < 200; i += 1) {
+      s = stepHound(s, vec2(600, 200), 1 / 60, world, FAR_AGGRO);
+    }
+    // Wall left face at x=384; a radius-20 footprint stops at x=364.
+    expect(s.position.x).toBeLessThanOrEqual(364 + 1e-6);
+  });
+
+  it('never leaves the world bounds', () => {
+    let s: HoundState = { ...createHoundState(FAR_AGGRO), position: vec2(900, 200) };
+    const world = openWorld(); // 960×960
+    for (let i = 0; i < 200; i += 1) {
+      s = stepHound(s, vec2(5000, 200), 1 / 60, world, FAR_AGGRO);
+    }
+    expect(s.position.x).toBeLessThanOrEqual(940 + 1e-6); // 960 - footprint 20
+  });
+
+  it('does not mutate the input state', () => {
+    const s = createHoundState(CONFIG);
+    stepHound(s, vec2(250, 200), 0.1, openWorld(), CONFIG);
+    expect(s.position).toEqual({ x: 200, y: 200 });
+    expect(s.mode).toBe('patrol');
+  });
+});
+
+describe('houndInContact', () => {
+  it('is true within the contact radius and false beyond it', () => {
+    const s = createHoundState(CONFIG); // at (200,200), contactRadius 30
+    expect(houndInContact(s, vec2(220, 200), CONFIG)).toBe(true); // dist 20
+    expect(houndInContact(s, vec2(240, 200), CONFIG)).toBe(false); // dist 40
+  });
+});

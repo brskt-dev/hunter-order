@@ -27,6 +27,14 @@ export { MOVEMENT_KEY_CODES, movementActionsFromCodes } from './keyboard-input';
 export { clampDeltaSeconds, stepPosition } from './movement';
 export type { MovementAction } from './movement-intent';
 export { intentFromActions } from './movement-intent';
+export {
+  createHoundState,
+  houndInContact,
+  type HoundMode,
+  type HoundState,
+  type RuinHoundConfig,
+  stepHound,
+} from './ruin-hound';
 export type { Vec2 } from './vec2';
 export { add, length, lerp, normalize, scale, vec2, ZERO } from './vec2';
 export type { TileRect, TileWorld, TileWorldSpec } from './world';
