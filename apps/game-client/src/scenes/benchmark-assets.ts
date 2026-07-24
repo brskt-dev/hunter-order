@@ -23,10 +23,19 @@ export interface ArtFrame {
 
 /** Texture key for the ancient-fragment item sprite. */
 export const FRAGMENT_TEXTURE = 'art-fragment';
-/** Base key for the ruin-hound directional idle (suffixed by facing). */
+/** Base key for the ruin-hound directional static idle (suffixed by facing). */
 export const HOUND_IDLE_BASE = 'art-hound-idle';
+/** Base key for the ruin-hound directional run animation (suffixed by facing). */
+export const HOUND_RUN_BASE = 'art-hound-run';
+/** Frames per direction in the run animation. */
+export const HOUND_RUN_FRAME_COUNT = 4;
 
-const HOUND_URLS: Record<Direction8, string> = {
+/** Texture key for one run frame (e.g. ('sw', 2) -> 'art-hound-run-sw-2'). */
+export function houndRunFrameKey(facing: Direction8, frame: number): string {
+  return `${directionalFrameKey(HOUND_RUN_BASE, facing)}-${frame}`;
+}
+
+const HOUND_IDLE_URLS: Record<Direction8, string> = {
   n: houndN,
   ne: houndNE,
   e: houndE,
@@ -37,6 +46,25 @@ const HOUND_URLS: Record<Direction8, string> = {
   nw: houndNW,
 };
 
+// Run frames (8 directions x 4) live under body/run/<dir>/<nnn>.png. Loaded by
+// glob so we don't hand-write 32 imports; the path yields the direction + index.
+const RUN_MODULES = import.meta.glob<string>(
+  '../assets/source/creatures/ruin-hound/body/run/*/*.png',
+  { eager: true, query: '?url', import: 'default' },
+);
+
+function runFrames(): ArtFrame[] {
+  const frames: ArtFrame[] = [];
+  for (const [path, url] of Object.entries(RUN_MODULES)) {
+    const match = /\/run\/([a-z]+)\/(\d+)\.png$/.exec(path);
+    if (!match) {
+      continue;
+    }
+    frames.push({ key: houndRunFrameKey(match[1] as Direction8, Number(match[2])), url });
+  }
+  return frames;
+}
+
 /** Geometry (from each metadata.json) for aligning real sprites to the feet pivot. */
 export const FRAGMENT_ART = { canvas: { width: 32, height: 32 } } as const;
 export const HOUND_ART = { canvas: { width: 68, height: 68 }, pivotY: 60 } as const;
@@ -44,8 +72,9 @@ export const HOUND_ART = { canvas: { width: 68, height: 68 }, pivotY: 60 } as co
 /** Every real-art frame the scene preloads (texture key -> bundled URL). */
 export const BENCHMARK_ART_FRAMES: readonly ArtFrame[] = [
   { key: FRAGMENT_TEXTURE, url: fragmentUrl },
-  ...(Object.keys(HOUND_URLS) as Direction8[]).map((facing) => ({
+  ...(Object.keys(HOUND_IDLE_URLS) as Direction8[]).map((facing) => ({
     key: directionalFrameKey(HOUND_IDLE_BASE, facing),
-    url: HOUND_URLS[facing],
+    url: HOUND_IDLE_URLS[facing],
   })),
+  ...runFrames(),
 ];

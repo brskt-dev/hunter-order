@@ -4,6 +4,7 @@ import {
   BenchmarkSimulation,
   clampDeltaSeconds,
   createTileWorld,
+  type Direction8,
   directionalFrameKey,
   directionToVector,
   intentFromActions,
@@ -24,6 +25,9 @@ import {
   FRAGMENT_TEXTURE,
   HOUND_ART,
   HOUND_IDLE_BASE,
+  HOUND_RUN_BASE,
+  HOUND_RUN_FRAME_COUNT,
+  houndRunFrameKey,
 } from './benchmark-assets';
 
 /**
@@ -116,7 +120,9 @@ export class BenchmarkScene extends BaseScene {
   private hound?: Phaser.GameObjects.Container;
   private houndShadow?: Phaser.GameObjects.Ellipse;
   private houndFacingTick?: Phaser.GameObjects.Rectangle;
-  private houndImage?: Phaser.GameObjects.Image;
+  private houndSprite?: Phaser.GameObjects.Sprite;
+  private houndPrev?: Vec2;
+  private houndRunReady = false;
   private dangerOverlay?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
@@ -172,6 +178,7 @@ export class BenchmarkScene extends BaseScene {
     this.drawWorld();
     this.drawInteractables(interactables);
     this.createHunter();
+    this.registerHoundAnimations();
     this.createHound();
     this.createPrompt();
     this.setupCamera();
@@ -248,8 +255,24 @@ export class BenchmarkScene extends BaseScene {
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
 
-    if (this.houndImage) {
-      this.houndImage.setTexture(directionalFrameKey(HOUND_IDLE_BASE, state.facing));
+    if (this.houndSprite) {
+      // Moving -> play the directional run loop; at rest -> the static idle pose.
+      const moving = this.houndPrev
+        ? Math.hypot(
+            state.position.x - this.houndPrev.x,
+            state.position.y - this.houndPrev.y,
+          ) > 0.05
+        : false;
+      this.houndPrev = state.position;
+      if (moving && this.houndRunReady) {
+        this.houndSprite.play(directionalFrameKey(HOUND_RUN_BASE, state.facing), true);
+      } else {
+        this.houndSprite.stop();
+        const idleKey = directionalFrameKey(HOUND_IDLE_BASE, state.facing);
+        if (this.textures.exists(idleKey)) {
+          this.houndSprite.setTexture(idleKey);
+        }
+      }
     } else if (this.houndFacingTick) {
       const tick = directionToVector(state.facing);
       this.houndFacingTick.setPosition(
@@ -405,6 +428,25 @@ export class BenchmarkScene extends BaseScene {
     return this.textures.exists(directionalFrameKey(HOUND_IDLE_BASE, 's'));
   }
 
+  /** Registers one looping run animation per direction from the loaded run frames. */
+  private registerHoundAnimations(): void {
+    if (!this.houndArtReady() || !this.textures.exists(houndRunFrameKey('s', 0))) {
+      return;
+    }
+    const dirs: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    for (const dir of dirs) {
+      const key = directionalFrameKey(HOUND_RUN_BASE, dir);
+      if (this.anims.exists(key)) {
+        continue; // shared across scene restarts
+      }
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < HOUND_RUN_FRAME_COUNT; i += 1) {
+        frames.push({ key: houndRunFrameKey(dir, i) });
+      }
+      this.anims.create({ key, frames, frameRate: 9, repeat: -1 });
+    }
+  }
+
   /**
    * The ruin hound: a separate runtime shadow + a body inside a depth-sorted
    * container. The body is the real directional sprite when its art loaded,
@@ -417,8 +459,10 @@ export class BenchmarkScene extends BaseScene {
     }
     const { colors, hound } = BENCHMARK;
     const { position } = state;
-    this.houndImage = undefined;
+    this.houndSprite = undefined;
     this.houndFacingTick = undefined;
+    this.houndPrev = undefined;
+    this.houndRunReady = false;
 
     this.houndShadow = this.add
       .ellipse(
@@ -434,10 +478,12 @@ export class BenchmarkScene extends BaseScene {
     let children: Phaser.GameObjects.GameObject[];
     if (this.houndArtReady()) {
       // Real sprite; feet-pivot aligned to the container origin (logical position).
-      this.houndImage = this.add
-        .image(0, 0, directionalFrameKey(HOUND_IDLE_BASE, state.facing))
+      // It plays the directional run animation while moving (see renderHound).
+      this.houndRunReady = this.textures.exists(houndRunFrameKey('s', 0));
+      this.houndSprite = this.add
+        .sprite(0, 0, directionalFrameKey(HOUND_IDLE_BASE, state.facing))
         .setOrigin(0.5, HOUND_ART.pivotY / HOUND_ART.canvas.height);
-      children = [this.houndImage];
+      children = [this.houndSprite];
     } else {
       const body = this.add
         .rectangle(0, -HOUND_BODY_HEIGHT / 2, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hound)

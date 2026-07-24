@@ -9,13 +9,19 @@
   "animations": {
     "idle": {
       "frames": 1,
-      "note": "Per-direction static rotation frame is the rendered idle this pass (idle/<dir>/000.png)."
+      "note": "Per-direction static rotation frame (idle/<dir>/000.png); rendered as the at-rest pose."
+    },
+    "run": {
+      "frames": 4,
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+      "path": "run/<dir>/",
+      "note": "PixelLab template running-4-frames, 8 directions (generated manually by the GD Lead). Played by the client while the hound moves."
     },
     "idle-south-8f": {
       "frames": 8,
       "directions": ["s"],
       "path": "anim/idle/s/",
-      "note": "PixelLab template idle, south only — a pipeline-branch validation artifact; NOT wired to the client render this pass."
+      "note": "PixelLab template idle, south only — earlier pipeline-branch validation artifact; not wired to the render."
     }
   },
   "source": {
