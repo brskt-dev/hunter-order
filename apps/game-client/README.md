@@ -118,6 +118,15 @@ is a thin Phaser adapter: it reads input, drives the simulation and renders the
 resulting logical state with placeholder primitives. Logical position (owned by
 the simulation) is kept separate from the rendered position (GD-0004).
 
+**Visual pilot (Stage 2).** The **ancient fragment** and the **ruin hound**
+(8-direction idle) now render real PixelLab pixel art (status `review`) via the
+art manifest ([`src/scenes/benchmark-assets.ts`](./src/scenes/benchmark-assets.ts));
+everything else (Hunter, tiles, overgrowth) stays greybox, and any asset whose
+texture is absent falls back to its primitive. Source frames + `metadata.json`
+live under [`src/assets/source/`](./src/assets/README.md); the pipeline is
+documented in [`tools/asset-pipeline/`](../../tools/asset-pipeline/README.md) and
+the style spec in [`docs/art-direction/`](../../docs/art-direction/README.md).
+
 **Benchmark-only / temporary.** The client-side simulation is
 **non-authoritative** — there is no realtime server transport yet (that needs
 its own ADR; see
