@@ -91,7 +91,6 @@ export class BenchmarkScene extends BaseScene {
   private interactQueued = false;
   private restartQueued = false;
   private lookAhead: Vec2 = ZERO;
-  private debugHud?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -128,20 +127,6 @@ export class BenchmarkScene extends BaseScene {
     this.setupCamera();
     this.setupInput();
     this.addHint();
-
-    // Dev-only input HUD for self-diagnosis (never shown in a production build).
-    if (this.context.env.isDev) {
-      this.debugHud = this.add
-        .text(12, 12, '', {
-          fontFamily: 'monospace',
-          fontSize: '12px',
-          color: COLORS.accent,
-          backgroundColor: 'rgba(12,15,12,0.7)',
-          padding: { x: 6, y: 4 },
-        })
-        .setScrollFactor(0)
-        .setDepth(DEPTH.ui);
-    }
   }
 
   override update(_time: number, delta: number): void {
@@ -180,17 +165,6 @@ export class BenchmarkScene extends BaseScene {
     const target = lookAheadTarget(intentFromActions(actions), BENCHMARK.camera.lookAheadDistance);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
     this.cameras.main.setFollowOffset(-this.lookAhead.x, -this.lookAhead.y);
-
-    if (this.debugHud) {
-      this.debugHud.setText(
-        [
-          'input debug (dev)',
-          `keys : ${[...this.pressedCodes].join(' ') || '-'}`,
-          `move : ${[...actions].join(' ') || '-'}`,
-          `pos  : ${Math.round(position.x)},${Math.round(position.y)}  facing: ${facing}`,
-        ].join('\n'),
-      );
-    }
   }
 
   private buildInteractables(): Interactable[] {
