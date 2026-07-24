@@ -4,9 +4,10 @@ Browser game client for Hunter Order. It contains the **client infrastructure**
 (rendering stack, application architecture) and the **first playable-loop
 greybox** — a benchmark-only, non-authoritative vertical slice with continuous
 movement, static collision, an exploration camera, a first environmental
-interaction and a first item discovery/pickup. Final combat, a full inventory,
-item identification, AI, networking, persistence, HUD and production art are
-**not** implemented yet.
+interaction, a first item discovery/pickup and a first threat encounter (a
+ruin-hound stub with a combat camera). Final combat, final creature AI, a full
+inventory, item identification, networking, persistence, HUD and production art
+are **not** implemented yet.
 
 ## Stack
 
@@ -48,8 +49,8 @@ src/
     context/              GameContext + createGameContext (composition root)
     scenes/               BaseScene, SceneKeys
   gameplay/               Phaser-free domain: vec2, direction, movement-intent,
-                          movement, collision, interaction, world, camera,
-                          benchmark-sim
+                          movement, collision, interaction, ruin-hound, world,
+                          camera, benchmark-sim
   scenes/
     boot-scene.ts         Boot screen (title + dev FPS) → hands off to benchmark
     benchmark-scene.ts    First playable-loop greybox (thin Phaser adapter)
@@ -87,7 +88,12 @@ Hunter is in range, and clearing it opens the passage. A discreet **unidentified
 ancient fragment** rests in the ruin's broken interior on the item-drop layer: a
 contextual `[E] Pick up · Unknown fragment` prompt appears in range, and
 collecting it removes the item from the world, shows a brief discovery line, and
-records it in a minimal satchel / pickup-log placeholder (not a full inventory).
+records it in a minimal satchel / pickup-log placeholder (not a full inventory). A
+medium **ruin hound** paces the lower "dangerous pocket": it patrols, notices the
+Hunter within an aggro radius, chases, and gives up past a larger de-aggro radius
+(hysteresis) — a deliberately small stub, not the final AI. While it chases, a
+**combat camera** eases into a moderate zoom-in with reduced look-ahead and eases
+back out when the threat breaks off; contact raises a restrained danger vignette.
 `R` restarts the scene; losing window focus releases held keys.
 
 | Input                        | Action                                            |
@@ -118,15 +124,17 @@ centralized in
 [`src/core/config/benchmark.ts`](./src/core/config/benchmark.ts) and marked
 temporary — not an approved game rule.
 
-**Not yet implemented:** the ruin-hound threat, combat, the combat camera,
-loop-completion feedback, a full inventory / item identification, and all
-production art. These are the next increments.
+**Not yet implemented:** offensive combat (attacking the hound), creature/Hunter
+damage and incapacitation, loop-completion feedback, a full inventory / item
+identification, and all production art. These are the next increments.
 
 Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
 `http://localhost:5173`, wait for the greybox, then walk the Hunter with WASD /
 arrows — bump into and slide along the ruin walls, feel the camera lead your
 movement, head into the ruin's interior to find the ancient fragment and press
-`E` to pick it up (watch the satchel line appear), and press `R` to restart.
+`E` to pick it up (watch the satchel line appear), then venture toward the lower
+pocket to rouse the ruin hound — it chases and the camera tightens; back off and
+it breaks off as the view relaxes. Press `R` to restart.
 
 ## Environment
 
