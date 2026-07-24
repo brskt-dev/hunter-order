@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BenchmarkSimulation, type HunterSimConfig, stepHunter } from './benchmark-simulation';
 import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
+import { type RuinHoundConfig } from './ruin-hound';
 import { length, vec2 } from './vec2';
 import { createTileWorld, type TileWorld } from './world';
 
@@ -233,5 +234,67 @@ describe('BenchmarkSimulation — item pickup / possession log', () => {
     sim.reset();
     expect(sim.collected).toEqual([]);
     expect(sim.interactables.find((i) => i.id === 'fragment')?.state).toBe('active');
+  });
+});
+
+describe('BenchmarkSimulation — ruin-hound threat', () => {
+  // Home just east of spawn (x=264) so approaching the Hunter trips the aggro.
+  const houndConfig = (): RuinHoundConfig => ({
+    speed: 90,
+    footprintRadius: 20,
+    waypoints: [vec2(450, 264)],
+    aggroRadius: 130,
+    deAggroRadius: 260,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+  });
+
+  const withHound = (): BenchmarkSimulation =>
+    new BenchmarkSimulation(openWorld(), CONFIG, [], houndConfig());
+
+  it('has no hound and no threat when none is configured', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    expect(sim.hound).toBeNull();
+    expect(sim.threatEngaged).toBe(false);
+    expect(sim.inDanger).toBe(false);
+  });
+
+  it('spawns the hound patrolling at home', () => {
+    const sim = withHound();
+    expect(sim.hound?.mode).toBe('patrol');
+    expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
+    expect(sim.threatEngaged).toBe(false);
+  });
+
+  it('engages and closes on an approaching Hunter', () => {
+    const sim = withHound();
+    for (let i = 0; i < 200 && !sim.threatEngaged; i += 1) {
+      sim.update(set('move-east'), 1 / 60);
+    }
+    expect(sim.threatEngaged).toBe(true);
+    for (let i = 0; i < 300 && !sim.inDanger; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.inDanger).toBe(true);
+  });
+
+  it('stays calm while the Hunter keeps its distance', () => {
+    const sim = withHound();
+    for (let i = 0; i < 120; i += 1) {
+      sim.update(noActions, 1 / 60); // Hunter never leaves the spawn pocket
+    }
+    expect(sim.threatEngaged).toBe(false);
+    expect(sim.inDanger).toBe(false);
+  });
+
+  it('reset returns the hound to patrol at home', () => {
+    const sim = withHound();
+    for (let i = 0; i < 200 && !sim.threatEngaged; i += 1) {
+      sim.update(set('move-east'), 1 / 60);
+    }
+    sim.reset();
+    expect(sim.hound?.mode).toBe('patrol');
+    expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
+    expect(sim.threatEngaged).toBe(false);
   });
 });

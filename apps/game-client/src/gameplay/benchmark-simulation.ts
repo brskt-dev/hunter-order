@@ -25,6 +25,13 @@ import {
 } from './interaction';
 import { stepPosition } from './movement';
 import { intentFromActions, type MovementAction } from './movement-intent';
+import {
+  createHoundState,
+  houndInContact,
+  type HoundState,
+  type RuinHoundConfig,
+  stepHound,
+} from './ruin-hound';
 import type { Vec2 } from './vec2';
 import type { TileWorld } from './world';
 
@@ -91,15 +98,18 @@ export class BenchmarkSimulation {
   private interactableList: Interactable[];
   private currentTarget: Interactable | null = null;
   private collectedList: CollectedItem[] = [];
+  private houndState: HoundState | null;
 
   constructor(
     private readonly world: TileWorld,
     private readonly config: HunterSimConfig,
     interactables: readonly Interactable[] = [],
+    private readonly houndConfig: RuinHoundConfig | null = null,
   ) {
     this.seed = interactables;
     this.interactableList = interactables.map((it) => ({ ...it }));
     this.state = BenchmarkSimulation.spawnState(world);
+    this.houndState = houndConfig ? createHoundState(houndConfig) : null;
     this.recomputeTarget();
   }
 
@@ -121,10 +131,40 @@ export class BenchmarkSimulation {
     return this.collectedList;
   }
 
+  /** The ruin hound's current state, or null when no hound is configured. */
+  get hound(): HoundState | null {
+    return this.houndState;
+  }
+
+  /** True while the hound is actively chasing the Hunter (drives combat camera). */
+  get threatEngaged(): boolean {
+    return this.houndState?.mode === 'chase';
+  }
+
+  /** True while the hound is in contact with the Hunter (a benchmark danger state). */
+  get inDanger(): boolean {
+    return (
+      this.houndState !== null &&
+      this.houndConfig !== null &&
+      houndInContact(this.houndState, this.state.position, this.houndConfig)
+    );
+  }
+
   update(actions: ReadonlySet<MovementAction>, dtSeconds: number): void {
     const solids = [...this.world.solids, ...activeBlockingRects(this.interactableList)];
     const world: TileWorld = { ...this.world, solids };
     this.state = stepHunter(this.state, actions, dtSeconds, world, this.config);
+    // The hound chases the Hunter's updated position and collides with the static
+    // world only (it ignores clearable obstructions — a deliberate stub simplification).
+    if (this.houndState && this.houndConfig) {
+      this.houndState = stepHound(
+        this.houndState,
+        this.state.position,
+        dtSeconds,
+        this.world,
+        this.houndConfig,
+      );
+    }
     this.recomputeTarget();
   }
 
@@ -151,6 +191,7 @@ export class BenchmarkSimulation {
     this.interactableList = this.seed.map((it) => ({ ...it }));
     this.collectedList = [];
     this.state = BenchmarkSimulation.spawnState(this.world);
+    this.houndState = this.houndConfig ? createHoundState(this.houndConfig) : null;
     this.recomputeTarget();
   }
 

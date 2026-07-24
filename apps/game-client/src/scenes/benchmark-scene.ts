@@ -9,7 +9,9 @@ import {
   type Interactable,
   lookAheadTarget,
   movementActionsFromCodes,
+  type RuinHoundConfig,
   smoothTowards,
+  tileCentre,
   type TileWorld,
   type Vec2,
   ZERO,
@@ -60,6 +62,21 @@ const BODY_HEIGHT = 46;
 const FACING_TICK_SIZE = 8;
 const FACING_TICK_RADIUS = 14;
 
+// Ruin-hound placeholder geometry (a low, wide quadruped silhouette).
+const HOUND_BODY_WIDTH = 46;
+const HOUND_BODY_HEIGHT = 22;
+const HOUND_TICK_SIZE = 7;
+const HOUND_TICK_RADIUS = 12;
+
+// Peak alpha of the danger vignette when the hound is in contact (restrained).
+const DANGER_MAX_ALPHA = 0.22;
+
+// Scalar frame-rate-independent smoothing toward a target (companion to the
+// Vec2 `smoothTowards`): the same 1 - e^(-rate*dt) curve.
+const approach = (current: number, target: number, rate: number, dt: number): number =>
+  dt <= 0 || rate <= 0 ? current : current + (target - current) * (1 - Math.exp(-rate * dt));
+const lerpScalar = (a: number, b: number, t: number): number => a + (b - a) * t;
+
 // Physical key codes for the non-movement semantic actions.
 const INTERACT_CODE = 'KeyE';
 const RESTART_CODE = 'KeyR';
@@ -95,10 +112,16 @@ export class BenchmarkScene extends BaseScene {
   private prompt?: Phaser.GameObjects.Text;
   private satchel?: Phaser.GameObjects.Text;
   private readonly interactableViews = new Map<string, Phaser.GameObjects.Shape>();
+  private hound?: Phaser.GameObjects.Container;
+  private houndShadow?: Phaser.GameObjects.Ellipse;
+  private houndFacingTick?: Phaser.GameObjects.Rectangle;
+  private dangerOverlay?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
   private restartQueued = false;
   private lookAhead: Vec2 = ZERO;
+  private combatIntensity = 0;
+  private dangerAlpha = 0;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -124,18 +147,37 @@ export class BenchmarkScene extends BaseScene {
         interactRange: BENCHMARK.interaction.range,
       },
       interactables,
+      this.buildHoundConfig(),
     );
     this.lookAhead = ZERO;
+    this.combatIntensity = 0;
+    this.dangerAlpha = 0;
     this.interactableViews.clear();
 
     this.drawWorld();
     this.drawInteractables(interactables);
     this.createHunter();
+    this.createHound();
     this.createPrompt();
     this.setupCamera();
     this.setupInput();
     this.addHint();
     this.createSatchel();
+    this.createDangerOverlay();
+  }
+
+  private buildHoundConfig(): RuinHoundConfig {
+    const ts = BENCHMARK.tileSize;
+    const h = BENCHMARK.hound;
+    return {
+      speed: h.speed,
+      footprintRadius: h.footprintRadius,
+      waypoints: h.patrolTiles.map((t) => tileCentre(t.col, t.row, ts)),
+      aggroRadius: h.aggroRadius,
+      deAggroRadius: h.deAggroRadius,
+      contactRadius: h.contactRadius,
+      arriveEpsilon: h.arriveEpsilon,
+    };
   }
 
   override update(_time: number, delta: number): void {
@@ -170,10 +212,47 @@ export class BenchmarkScene extends BaseScene {
     );
 
     this.updatePrompt();
+    this.renderHound();
+    this.updateCombatCamera(intentFromActions(actions), dt);
+  }
 
-    const target = lookAheadTarget(intentFromActions(actions), BENCHMARK.camera.lookAheadDistance);
+  /** Mirrors the hound's logical state onto its placeholder (body/shadow/facing). */
+  private renderHound(): void {
+    const state = this.sim.hound;
+    if (!state || !this.hound || !this.houndShadow || !this.houndFacingTick) {
+      return;
+    }
+    this.hound.setPosition(state.position.x, state.position.y);
+    this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
+    this.houndShadow.setPosition(state.position.x, state.position.y);
+    const tick = DIRECTION_OFFSET[state.facing];
+    this.houndFacingTick.setPosition(
+      tick.x * HOUND_TICK_RADIUS,
+      -HOUND_BODY_HEIGHT * 0.5 + tick.y * HOUND_TICK_RADIUS,
+    );
+  }
+
+  /**
+   * Presentation-only combat camera (GD-0004): a smoothed 0..1 engagement drives
+   * a moderate zoom-in and reduced look-ahead while the hound chases, easing back
+   * on disengage (hysteresis lives in the AI's chase/return modes). Also drives
+   * the danger vignette. Never changes logical distance, range or perception.
+   */
+  private updateCombatCamera(intent: Vec2, dt: number): void {
+    const cc = BENCHMARK.combatCamera;
+    const engaged = this.sim.threatEngaged ? 1 : 0;
+    this.combatIntensity = approach(this.combatIntensity, engaged, cc.intensitySmoothing, dt);
+
+    this.cameras.main.setZoom(lerpScalar(cc.exploreZoom, cc.combatZoom, this.combatIntensity));
+
+    const laScale = lerpScalar(1, cc.lookAheadCombatScale, this.combatIntensity);
+    const target = lookAheadTarget(intent, BENCHMARK.camera.lookAheadDistance * laScale);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
     this.cameras.main.setFollowOffset(-this.lookAhead.x, -this.lookAhead.y);
+
+    const dangerTarget = this.sim.inDanger ? DANGER_MAX_ALPHA : 0;
+    this.dangerAlpha = approach(this.dangerAlpha, dangerTarget, cc.intensitySmoothing, dt);
+    this.dangerOverlay?.setAlpha(this.dangerAlpha);
   }
 
   private buildInteractables(): Interactable[] {
@@ -291,6 +370,59 @@ export class BenchmarkScene extends BaseScene {
       .setDepth(DEPTH.entity + spawn.y);
   }
 
+  /** The ruin-hound placeholder: wide body + separate runtime shadow + nose tick. */
+  private createHound(): void {
+    const state = this.sim.hound;
+    if (!state) {
+      return;
+    }
+    const { colors, hound } = BENCHMARK;
+    const { position } = state;
+
+    this.houndShadow = this.add
+      .ellipse(
+        position.x,
+        position.y,
+        hound.footprintRadius * 2,
+        hound.footprintRadius,
+        colors.footprint,
+        0.5,
+      )
+      .setDepth(DEPTH.shadow);
+
+    const body = this.add
+      .rectangle(0, -HOUND_BODY_HEIGHT / 2, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hound)
+      .setStrokeStyle(2, colors.houndStroke);
+    this.houndFacingTick = this.add.rectangle(
+      0,
+      -HOUND_BODY_HEIGHT / 2,
+      HOUND_TICK_SIZE,
+      HOUND_TICK_SIZE,
+      colors.houndStroke,
+    );
+
+    this.hound = this.add
+      .container(position.x, position.y, [body, this.houndFacingTick])
+      .setDepth(DEPTH.entity + position.y);
+  }
+
+  // Screen-fixed red vignette shown while the hound is in contact. Oversized and
+  // centred so it still covers the view under the combat-camera zoom; its alpha is
+  // driven from the danger state each frame.
+  private createDangerOverlay(): void {
+    this.dangerOverlay = this.add
+      .rectangle(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2,
+        GAME_WIDTH * 1.6,
+        GAME_HEIGHT * 1.6,
+        BENCHMARK.colors.danger,
+      )
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui - 1)
+      .setAlpha(0);
+  }
+
   private createPrompt(): void {
     this.prompt = this.add
       .text(0, 0, '', {
@@ -324,6 +456,7 @@ export class BenchmarkScene extends BaseScene {
     const camera = this.cameras.main;
     camera.setBounds(0, 0, this.world.bounds.width, this.world.bounds.height);
     camera.setRoundPixels(true);
+    camera.setZoom(BENCHMARK.combatCamera.exploreZoom); // reset on (re)start before combat zoom
     camera.startFollow(this.hunter, true, BENCHMARK.camera.followLerp, BENCHMARK.camera.followLerp);
   }
 

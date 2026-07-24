@@ -101,6 +101,43 @@ export const BENCHMARK = {
     },
   ],
 
+  /**
+   * The medium "ruin hound" threat (stub behaviour, NOT the final AI or combat
+   * model — both are Level C / non-goals). It paces the patrol path (index 0 is
+   * home), chases the Hunter within `aggroRadius`, and gives up past the larger
+   * `deAggroRadius` (hysteresis). It lives in the lower "mildly dangerous pocket".
+   * All values provisional/benchmark-only.
+   */
+  hound: {
+    patrolTiles: [
+      { col: 23, row: 27 }, // home
+      { col: 23, row: 22 },
+    ],
+    /** Slower than the Hunter (walkSpeed 140) so retreat/spacing works. */
+    speed: 118,
+    /** Provisional; medium creature, slightly larger footprint than the Hunter. */
+    footprintRadius: 20,
+    aggroRadius: 190,
+    deAggroRadius: 340,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+  },
+
+  /**
+   * Combat camera (presentation only — never changes range, perception or logical
+   * distance, per GD-0004). While the hound is engaged, the view eases toward a
+   * moderate zoom-in with reduced look-ahead; it eases back on disengage. Exact
+   * constants remain open. Benchmark-only.
+   */
+  combatCamera: {
+    exploreZoom: 1,
+    combatZoom: 1.32,
+    /** Reduce exploration look-ahead to this fraction at full combat intensity. */
+    lookAheadCombatScale: 0.4,
+    /** Engagement smoothing rate (per second); drives zoom + look-ahead + danger. */
+    intensitySmoothing: 4,
+  },
+
   /** Greybox placeholder palette (numeric for Phaser primitives). */
   colors: {
     ground: 0x2f3a2c,
@@ -117,6 +154,12 @@ export const BENCHMARK = {
     // (no glow). Reads as interactable on the ground without shouting "loot".
     fragment: 0x8a8672,
     fragmentAccent: 0xc9b88a,
+    // Ruin hound: dark, earthy fur with a subtle warmer accent — contrasts the
+    // green ground and reads as a predator without being cartoonish.
+    hound: 0x2e2a28,
+    houndStroke: 0x6b5a48,
+    // Danger vignette shown while the hound is in contact (muted red, low alpha).
+    danger: 0x7a2222,
     prompt: 0xf4f4ec,
   },
 } as const;
