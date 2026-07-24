@@ -66,4 +66,23 @@ describe('benchmark config', () => {
     expect(fragment?.collectible).toBe(true);
     expect(fragment?.blocksWhileActive).toBe(false);
   });
+
+  it('keeps the hound patrol path inside the grid and out of solids', () => {
+    expect(BENCHMARK.hound.patrolTiles.length).toBeGreaterThan(0);
+    for (const t of BENCHMARK.hound.patrolTiles) {
+      expect(t.col).toBeGreaterThanOrEqual(0);
+      expect(t.row).toBeGreaterThanOrEqual(0);
+      expect(t.col).toBeLessThan(BENCHMARK.world.cols);
+      expect(t.row).toBeLessThan(BENCHMARK.world.rows);
+      const inSolid = BENCHMARK.solidTiles.some(
+        (s) => t.col >= s.col && t.col < s.col + s.cols && t.row >= s.row && t.row < s.row + s.rows,
+      );
+      expect(inSolid).toBe(false);
+    }
+  });
+
+  it('gives the hound hysteresis (de-aggro radius beyond the aggro radius)', () => {
+    expect(BENCHMARK.hound.deAggroRadius).toBeGreaterThan(BENCHMARK.hound.aggroRadius);
+    expect(BENCHMARK.hound.contactRadius).toBeGreaterThan(0);
+  });
 });
