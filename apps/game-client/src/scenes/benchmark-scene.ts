@@ -6,8 +6,9 @@ import {
   createTileWorld,
   type Direction8,
   intentFromActions,
+  type Interactable,
   lookAheadTarget,
-  type MovementAction,
+  movementActionsFromCodes,
   smoothTowards,
   type TileWorld,
   type Vec2,
@@ -18,12 +19,19 @@ import Phaser from 'phaser';
 /**
  * First-playable-loop greybox — the "Overgrown Ruin" benchmark scene.
  *
- * This is a thin Phaser adapter: all movement, collision and camera *logic*
- * lives in the Phaser-free, unit-tested {@link BenchmarkSimulation} and the
- * `@gameplay` core. The scene reads keyboard input, drives the simulation, and
- * renders the resulting logical state with placeholder primitives. Logical
- * position (owned by the simulation) is kept strictly separate from the
- * rendered position (set here) — GD-0004.
+ * This is a thin Phaser adapter: all movement, collision, camera and
+ * interaction *logic* lives in the Phaser-free, unit-tested
+ * {@link BenchmarkSimulation} and the `@gameplay` core. The scene reads keyboard
+ * input, drives the simulation, and renders the resulting logical state with
+ * placeholder primitives. Logical position (owned by the simulation) is kept
+ * strictly separate from the rendered position (set here) — GD-0004.
+ *
+ * Input is read from a capture-phase `window` keydown/keyup listener keyed on
+ * `event.code` (physical keys). This is deliberate: it is layout-independent,
+ * and it receives keys before any bubble-phase handler or browser extension can
+ * `preventDefault` them — Phaser's own keyboard handler is bubble-phase and
+ * silently drops already-defaulted events, which made WASD/E fail under some
+ * extensions while arrows worked.
  *
  * The world is rendered with an identity logical->screen projection for now;
  * the oblique presentation is a later art-pass concern and, per GD-0004, must
@@ -34,13 +42,14 @@ import Phaser from 'phaser';
  */
 
 // Render layer depths, following the approved layer stack (asset-specification):
-// ground / ground-decal / low-object / shadow / entity-body / ui-over-world.
+// ground / ground-decal / low-object / shadow / entity-body / world-ui.
 const DEPTH = {
   ground: 0,
   groundDecal: 10,
   lowObject: 100,
   shadow: 200,
   entity: 1000, // + pivot.y so entities sort front-to-back by their feet
+  worldUi: 90_000,
   ui: 100_000,
 } as const;
 
@@ -49,6 +58,10 @@ const BODY_WIDTH = 26;
 const BODY_HEIGHT = 46;
 const FACING_TICK_SIZE = 8;
 const FACING_TICK_RADIUS = 14;
+
+// Physical key codes for the non-movement semantic actions.
+const INTERACT_CODE = 'KeyE';
+const RESTART_CODE = 'KeyR';
 
 const DIAGONAL = Math.SQRT1_2;
 const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
@@ -62,17 +75,9 @@ const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
   nw: { x: -DIAGONAL, y: -DIAGONAL },
 };
 
-interface MovementKeys {
-  up: Phaser.Input.Keyboard.Key;
-  down: Phaser.Input.Keyboard.Key;
-  left: Phaser.Input.Keyboard.Key;
-  right: Phaser.Input.Keyboard.Key;
-  w: Phaser.Input.Keyboard.Key;
-  a: Phaser.Input.Keyboard.Key;
-  s: Phaser.Input.Keyboard.Key;
-  d: Phaser.Input.Keyboard.Key;
-  restart: Phaser.Input.Keyboard.Key;
-}
+// Contextual prompt verb per interactable kind (benchmark placeholder).
+const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut' };
+const cssHex = (value: number): string => `#${value.toString(16).padStart(6, '0')}`;
 
 export class BenchmarkScene extends BaseScene {
   private world!: TileWorld;
@@ -80,7 +85,11 @@ export class BenchmarkScene extends BaseScene {
   private hunter!: Phaser.GameObjects.Container;
   private shadow!: Phaser.GameObjects.Ellipse;
   private facingTick!: Phaser.GameObjects.Rectangle;
-  private keys?: MovementKeys;
+  private prompt?: Phaser.GameObjects.Text;
+  private readonly interactableViews = new Map<string, Phaser.GameObjects.Rectangle>();
+  private readonly pressedCodes = new Set<string>();
+  private interactQueued = false;
+  private restartQueued = false;
   private lookAhead: Vec2 = ZERO;
 
   constructor() {
@@ -98,14 +107,23 @@ export class BenchmarkScene extends BaseScene {
       spawnTile: BENCHMARK.spawnTile,
       solidTiles: BENCHMARK.solidTiles,
     });
-    this.sim = new BenchmarkSimulation(this.world, {
-      speed: BENCHMARK.movement.walkSpeed,
-      footprintRadius: BENCHMARK.hunter.footprintRadius,
-    });
+    const interactables = this.buildInteractables();
+    this.sim = new BenchmarkSimulation(
+      this.world,
+      {
+        speed: BENCHMARK.movement.walkSpeed,
+        footprintRadius: BENCHMARK.hunter.footprintRadius,
+        interactRange: BENCHMARK.interaction.range,
+      },
+      interactables,
+    );
     this.lookAhead = ZERO;
+    this.interactableViews.clear();
 
     this.drawWorld();
+    this.drawInteractables(interactables);
     this.createHunter();
+    this.createPrompt();
     this.setupCamera();
     this.setupInput();
     this.addHint();
@@ -117,13 +135,19 @@ export class BenchmarkScene extends BaseScene {
     }
     const dt = clampDeltaSeconds(delta, BENCHMARK.movement.maxDeltaSeconds);
 
-    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.restart)) {
+    if (this.restartQueued) {
+      this.restartQueued = false;
       this.scene.restart();
       return;
     }
 
-    const actions = this.readActions();
+    const actions = movementActionsFromCodes(this.pressedCodes);
     this.sim.update(actions, dt);
+
+    if (this.interactQueued) {
+      this.interactQueued = false;
+      this.handleInteract();
+    }
 
     const { position, facing } = this.sim.hunter;
     this.hunter.setPosition(position.x, position.y);
@@ -136,9 +160,27 @@ export class BenchmarkScene extends BaseScene {
       -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
     );
 
+    this.updatePrompt();
+
     const target = lookAheadTarget(intentFromActions(actions), BENCHMARK.camera.lookAheadDistance);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
     this.cameras.main.setFollowOffset(-this.lookAhead.x, -this.lookAhead.y);
+  }
+
+  private buildInteractables(): Interactable[] {
+    const ts = BENCHMARK.tileSize;
+    return BENCHMARK.interactables.map((it) => ({
+      id: it.id,
+      kind: it.kind,
+      bounds: {
+        x: it.tile.col * ts,
+        y: it.tile.row * ts,
+        width: it.tile.cols * ts,
+        height: it.tile.rows * ts,
+      },
+      blocksWhileActive: it.blocksWhileActive,
+      state: 'active' as const,
+    }));
   }
 
   private drawWorld(): void {
@@ -171,6 +213,18 @@ export class BenchmarkScene extends BaseScene {
         .setOrigin(0, 0)
         .setStrokeStyle(2, colors.solidStroke)
         .setDepth(DEPTH.lowObject);
+    }
+  }
+
+  private drawInteractables(interactables: readonly Interactable[]): void {
+    const { colors } = BENCHMARK;
+    for (const it of interactables) {
+      const view = this.add
+        .rectangle(it.bounds.x, it.bounds.y, it.bounds.width, it.bounds.height, colors.overgrowth)
+        .setOrigin(0, 0)
+        .setStrokeStyle(2, colors.overgrowthStroke)
+        .setDepth(DEPTH.lowObject + 1);
+      this.interactableViews.set(it.id, view);
     }
   }
 
@@ -207,6 +261,20 @@ export class BenchmarkScene extends BaseScene {
       .setDepth(DEPTH.entity + spawn.y);
   }
 
+  private createPrompt(): void {
+    this.prompt = this.add
+      .text(0, 0, '', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: cssHex(BENCHMARK.colors.prompt),
+        backgroundColor: 'rgba(12,15,12,0.8)',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+  }
+
   private setupCamera(): void {
     const camera = this.cameras.main;
     camera.setBounds(0, 0, this.world.bounds.width, this.world.bounds.height);
@@ -215,31 +283,36 @@ export class BenchmarkScene extends BaseScene {
   }
 
   private setupInput(): void {
-    const keyboard = this.input.keyboard;
-    if (!keyboard) {
-      this.log.warn('Keyboard plugin unavailable; benchmark movement disabled');
-      return;
-    }
-    this.keys = keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.UP,
-      down: Phaser.Input.Keyboard.KeyCodes.DOWN,
-      left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      w: Phaser.Input.Keyboard.KeyCodes.W,
-      a: Phaser.Input.Keyboard.KeyCodes.A,
-      s: Phaser.Input.Keyboard.KeyCodes.S,
-      d: Phaser.Input.Keyboard.KeyCodes.D,
-      restart: Phaser.Input.Keyboard.KeyCodes.R,
-    }) as MovementKeys;
-
+    const onKeyDown = (event: KeyboardEvent): void => {
+      this.pressedCodes.add(event.code);
+      if (event.code === INTERACT_CODE) {
+        this.interactQueued = true;
+      } else if (event.code === RESTART_CODE) {
+        this.restartQueued = true;
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent): void => {
+      this.pressedCodes.delete(event.code);
+    };
     // Losing focus releases held keys so the Hunter never "runs away" while the
     // player is typing elsewhere (GD-0004 controls: focus loss releases keys).
-    const releaseKeys = (): void => {
-      keyboard.resetKeys();
+    const onBlur = (): void => {
+      this.pressedCodes.clear();
     };
-    this.game.events.on(Phaser.Core.Events.BLUR, releaseKeys);
+
+    // Capture phase so we receive keys before any bubble-phase handler/extension
+    // can preventDefault them (the cause of WASD/E being swallowed for some users).
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.game.events.off(Phaser.Core.Events.BLUR, releaseKeys);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
+      this.pressedCodes.clear();
+      this.interactQueued = false;
+      this.restartQueued = false;
       this.bus.emit('scene:shutdown', { key: this.scene.key });
     });
   }
@@ -249,31 +322,43 @@ export class BenchmarkScene extends BaseScene {
       .text(
         12,
         GAME_HEIGHT - 22,
-        'WASD / Arrows: move   ·   R: restart   ·   greybox benchmark (non-authoritative)',
+        'WASD / Arrows: move   ·   E: interact   ·   R: restart   ·   greybox benchmark (non-authoritative)',
         { fontFamily: 'monospace', fontSize: '12px', color: COLORS.accent },
       )
       .setScrollFactor(0)
       .setDepth(DEPTH.ui);
   }
 
-  private readActions(): ReadonlySet<MovementAction> {
-    const actions = new Set<MovementAction>();
-    const keys = this.keys;
-    if (!keys) {
-      return actions;
+  private handleInteract(): void {
+    const cleared = this.sim.tryInteract();
+    if (!cleared) {
+      return;
     }
-    if (keys.up.isDown || keys.w.isDown) {
-      actions.add('move-north');
+    const view = this.interactableViews.get(cleared.id);
+    if (view) {
+      this.tweens.add({
+        targets: view,
+        alpha: 0,
+        duration: 180,
+        onComplete: () => view.setVisible(false),
+      });
     }
-    if (keys.down.isDown || keys.s.isDown) {
-      actions.add('move-south');
+    this.log.info('Benchmark interaction: cleared obstruction', cleared.id);
+  }
+
+  private updatePrompt(): void {
+    if (!this.prompt) {
+      return;
     }
-    if (keys.left.isDown || keys.a.isDown) {
-      actions.add('move-west');
+    const target = this.sim.target;
+    if (!target) {
+      this.prompt.setVisible(false);
+      return;
     }
-    if (keys.right.isDown || keys.d.isDown) {
-      actions.add('move-east');
-    }
-    return actions;
+    const label = INTERACT_LABEL[target.kind] ?? 'Use';
+    this.prompt
+      .setText(`[E] ${label}`)
+      .setPosition(target.bounds.x + target.bounds.width / 2, target.bounds.y - 8)
+      .setVisible(true);
   }
 }

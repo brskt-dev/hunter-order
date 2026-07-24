@@ -71,6 +71,22 @@ export const BENCHMARK = {
     lookAheadSmoothing: 4,
   },
 
+  /** Provisional interaction reach (world px, footprint edge to obstruction). */
+  interaction: { range: 44 },
+
+  /**
+   * Environmental obstructions the Hunter can clear with the axe. Placeholder
+   * greybox content: blocks movement while active, opens passage once cleared.
+   */
+  interactables: [
+    {
+      id: 'overgrowth-1',
+      kind: 'overgrowth',
+      tile: { col: 9, row: 3, cols: 1, rows: 4 },
+      blocksWhileActive: true,
+    },
+  ],
+
   /** Greybox placeholder palette (numeric for Phaser primitives). */
   colors: {
     ground: 0x2f3a2c,
@@ -81,5 +97,8 @@ export const BENCHMARK = {
     hunter: 0xd8c9a0,
     hunterFacing: 0x24241f,
     footprint: 0x171717,
+    overgrowth: 0x4a7a3f,
+    overgrowthStroke: 0x6fae5f,
+    prompt: 0xf4f4ec,
   },
 } as const;

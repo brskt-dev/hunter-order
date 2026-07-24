@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import { BenchmarkSimulation, type HunterSimConfig, stepHunter } from './benchmark-simulation';
+import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
 import { length, vec2 } from './vec2';
 import { createTileWorld, type TileWorld } from './world';
 
-const CONFIG: HunterSimConfig = { speed: 140, footprintRadius: 16 };
+const CONFIG: HunterSimConfig = { speed: 140, footprintRadius: 16, interactRange: 40 };
+
+// An overgrowth obstruction just east of the open-world spawn (x=264): its left
+// face is at x=336, so a radius-16 footprint is blocked at x=320.
+const overgrowth = (): Interactable => ({
+  id: 'roots',
+  kind: 'overgrowth',
+  bounds: { x: 336, y: 240, width: 48, height: 96 },
+  blocksWhileActive: true,
+  state: 'active',
+});
 
 const openWorld = (): TileWorld =>
   createTileWorld({
@@ -94,5 +105,56 @@ describe('stepHunter', () => {
     stepHunter(start, set('move-east'), 1 / 60, world, CONFIG);
     expect(start.position).toEqual({ x: 264, y: 264 });
     expect(start.facing).toBe('s');
+  });
+});
+
+describe('BenchmarkSimulation — environmental interaction', () => {
+  const approachEast = (sim: BenchmarkSimulation): void => {
+    for (let i = 0; i < 120; i += 1) {
+      sim.update(set('move-east'), 1 / 60);
+    }
+  };
+
+  it('blocks movement through an active obstruction', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    approachEast(sim);
+    expect(sim.hunter.position.x).toBeLessThanOrEqual(336 - CONFIG.footprintRadius + 1e-6);
+  });
+
+  it('has no target at spawn but acquires one after approaching', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    expect(sim.target).toBeNull();
+    approachEast(sim);
+    expect(sim.target?.id).toBe('roots');
+  });
+
+  it('clears the target on interact and then lets the Hunter pass', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    approachEast(sim);
+    const blockedX = sim.hunter.position.x;
+
+    const cleared = sim.tryInteract();
+    expect(cleared?.id).toBe('roots');
+    expect(sim.interactables.find((i) => i.id === 'roots')?.state).toBe('cleared');
+
+    approachEast(sim);
+    expect(sim.hunter.position.x).toBeGreaterThan(blockedX + 20);
+  });
+
+  it('interact is single-fire and a no-op with no target in range', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    expect(sim.tryInteract()).toBeNull(); // far away at spawn
+    approachEast(sim);
+    expect(sim.tryInteract()?.id).toBe('roots');
+    expect(sim.tryInteract()).toBeNull(); // already cleared
+  });
+
+  it('reset restores interactables to active', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    approachEast(sim);
+    sim.tryInteract();
+    sim.reset();
+    expect(sim.interactables.find((i) => i.id === 'roots')?.state).toBe('active');
+    expect(sim.target).toBeNull();
   });
 });
