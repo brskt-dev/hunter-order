@@ -91,6 +91,11 @@ losing window focus releases held keys.
 | `E`                          | Interact with the obstruction in range (cut) |
 | `R`                          | Restart the scene                            |
 
+Controls are read by physical key position (`event.code`) from a capture-phase
+`window` listener, so they are keyboard-layout independent and are received
+before page/browser shortcuts or extensions (e.g. Vim-style navigators) can
+swallow letter keys.
+
 **Where the logic lives.** All movement, collision, facing, camera and
 interaction logic is in the Phaser-free, unit-tested `src/gameplay/` core
 (`@gameplay`). `BenchmarkScene`

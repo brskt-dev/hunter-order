@@ -22,6 +22,7 @@ export {
   type Interactable,
   type InteractableState,
 } from './interaction';
+export { MOVEMENT_KEY_CODES, movementActionsFromCodes } from './keyboard-input';
 export { clampDeltaSeconds, stepPosition } from './movement';
 export type { MovementAction } from './movement-intent';
 export { intentFromActions } from './movement-intent';

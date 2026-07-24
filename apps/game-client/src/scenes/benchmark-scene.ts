@@ -8,7 +8,7 @@ import {
   intentFromActions,
   type Interactable,
   lookAheadTarget,
-  type MovementAction,
+  movementActionsFromCodes,
   smoothTowards,
   type TileWorld,
   type Vec2,
@@ -25,6 +25,13 @@ import Phaser from 'phaser';
  * input, drives the simulation, and renders the resulting logical state with
  * placeholder primitives. Logical position (owned by the simulation) is kept
  * strictly separate from the rendered position (set here) — GD-0004.
+ *
+ * Input is read from a capture-phase `window` keydown/keyup listener keyed on
+ * `event.code` (physical keys). This is deliberate: it is layout-independent,
+ * and it receives keys before any bubble-phase handler or browser extension can
+ * `preventDefault` them — Phaser's own keyboard handler is bubble-phase and
+ * silently drops already-defaulted events, which made WASD/E fail under some
+ * extensions while arrows worked.
  *
  * The world is rendered with an identity logical->screen projection for now;
  * the oblique presentation is a later art-pass concern and, per GD-0004, must
@@ -52,6 +59,10 @@ const BODY_HEIGHT = 46;
 const FACING_TICK_SIZE = 8;
 const FACING_TICK_RADIUS = 14;
 
+// Physical key codes for the non-movement semantic actions.
+const INTERACT_CODE = 'KeyE';
+const RESTART_CODE = 'KeyR';
+
 const DIAGONAL = Math.SQRT1_2;
 const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
   n: { x: 0, y: -1 },
@@ -68,29 +79,18 @@ const DIRECTION_OFFSET: Record<Direction8, Vec2> = {
 const INTERACT_LABEL: Record<string, string> = { overgrowth: 'Cut' };
 const cssHex = (value: number): string => `#${value.toString(16).padStart(6, '0')}`;
 
-interface InputKeys {
-  up: Phaser.Input.Keyboard.Key;
-  down: Phaser.Input.Keyboard.Key;
-  left: Phaser.Input.Keyboard.Key;
-  right: Phaser.Input.Keyboard.Key;
-  w: Phaser.Input.Keyboard.Key;
-  a: Phaser.Input.Keyboard.Key;
-  s: Phaser.Input.Keyboard.Key;
-  d: Phaser.Input.Keyboard.Key;
-  interact: Phaser.Input.Keyboard.Key;
-  restart: Phaser.Input.Keyboard.Key;
-}
-
 export class BenchmarkScene extends BaseScene {
   private world!: TileWorld;
   private sim!: BenchmarkSimulation;
   private hunter!: Phaser.GameObjects.Container;
   private shadow!: Phaser.GameObjects.Ellipse;
   private facingTick!: Phaser.GameObjects.Rectangle;
-  private keys?: InputKeys;
-  private lookAhead: Vec2 = ZERO;
-  private readonly interactableViews = new Map<string, Phaser.GameObjects.Rectangle>();
   private prompt?: Phaser.GameObjects.Text;
+  private readonly interactableViews = new Map<string, Phaser.GameObjects.Rectangle>();
+  private readonly pressedCodes = new Set<string>();
+  private interactQueued = false;
+  private restartQueued = false;
+  private lookAhead: Vec2 = ZERO;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -135,15 +135,17 @@ export class BenchmarkScene extends BaseScene {
     }
     const dt = clampDeltaSeconds(delta, BENCHMARK.movement.maxDeltaSeconds);
 
-    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.restart)) {
+    if (this.restartQueued) {
+      this.restartQueued = false;
       this.scene.restart();
       return;
     }
 
-    const actions = this.readActions();
+    const actions = movementActionsFromCodes(this.pressedCodes);
     this.sim.update(actions, dt);
 
-    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.interact)) {
+    if (this.interactQueued) {
+      this.interactQueued = false;
       this.handleInteract();
     }
 
@@ -281,32 +283,36 @@ export class BenchmarkScene extends BaseScene {
   }
 
   private setupInput(): void {
-    const keyboard = this.input.keyboard;
-    if (!keyboard) {
-      this.log.warn('Keyboard plugin unavailable; benchmark movement disabled');
-      return;
-    }
-    this.keys = keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.UP,
-      down: Phaser.Input.Keyboard.KeyCodes.DOWN,
-      left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      w: Phaser.Input.Keyboard.KeyCodes.W,
-      a: Phaser.Input.Keyboard.KeyCodes.A,
-      s: Phaser.Input.Keyboard.KeyCodes.S,
-      d: Phaser.Input.Keyboard.KeyCodes.D,
-      interact: Phaser.Input.Keyboard.KeyCodes.E,
-      restart: Phaser.Input.Keyboard.KeyCodes.R,
-    }) as InputKeys;
-
+    const onKeyDown = (event: KeyboardEvent): void => {
+      this.pressedCodes.add(event.code);
+      if (event.code === INTERACT_CODE) {
+        this.interactQueued = true;
+      } else if (event.code === RESTART_CODE) {
+        this.restartQueued = true;
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent): void => {
+      this.pressedCodes.delete(event.code);
+    };
     // Losing focus releases held keys so the Hunter never "runs away" while the
     // player is typing elsewhere (GD-0004 controls: focus loss releases keys).
-    const releaseKeys = (): void => {
-      keyboard.resetKeys();
+    const onBlur = (): void => {
+      this.pressedCodes.clear();
     };
-    this.game.events.on(Phaser.Core.Events.BLUR, releaseKeys);
+
+    // Capture phase so we receive keys before any bubble-phase handler/extension
+    // can preventDefault them (the cause of WASD/E being swallowed for some users).
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.game.events.off(Phaser.Core.Events.BLUR, releaseKeys);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
+      this.pressedCodes.clear();
+      this.interactQueued = false;
+      this.restartQueued = false;
       this.bus.emit('scene:shutdown', { key: this.scene.key });
     });
   }
@@ -354,26 +360,5 @@ export class BenchmarkScene extends BaseScene {
       .setText(`[E] ${label}`)
       .setPosition(target.bounds.x + target.bounds.width / 2, target.bounds.y - 8)
       .setVisible(true);
-  }
-
-  private readActions(): ReadonlySet<MovementAction> {
-    const actions = new Set<MovementAction>();
-    const keys = this.keys;
-    if (!keys) {
-      return actions;
-    }
-    if (keys.up.isDown || keys.w.isDown) {
-      actions.add('move-north');
-    }
-    if (keys.down.isDown || keys.s.isDown) {
-      actions.add('move-south');
-    }
-    if (keys.left.isDown || keys.a.isDown) {
-      actions.add('move-west');
-    }
-    if (keys.right.isDown || keys.d.isDown) {
-      actions.add('move-east');
-    }
-    return actions;
   }
 }
