@@ -4,10 +4,10 @@ Browser game client for Hunter Order. It contains the **client infrastructure**
 (rendering stack, application architecture) and the **first playable-loop
 greybox** — a benchmark-only, non-authoritative vertical slice with continuous
 movement, static collision, an exploration camera, a first environmental
-interaction, a first item discovery/pickup and a first threat encounter (a
-ruin-hound stub with a combat camera). Final combat, final creature AI, a full
-inventory, item identification, networking, persistence, HUD and production art
-are **not** implemented yet.
+interaction, a first item discovery/pickup, and a first threat encounter with a
+basic axe response (a ruin-hound stub + combat camera). A final combat/damage
+model, final creature AI, a full inventory, item identification, networking,
+persistence, HUD and production art are **not** implemented yet.
 
 ## Stack
 
@@ -94,12 +94,16 @@ Hunter within an aggro radius, chases, and gives up past a larger de-aggro radiu
 (hysteresis) — a deliberately small stub, not the final AI. While it chases, a
 **combat camera** eases into a moderate zoom-in with reduced look-ahead and eases
 back out when the threat breaks off; contact raises a restrained danger vignette.
-`R` restarts the scene; losing window focus releases held keys.
+Pressing **Space** swings the hand axe: a few hits landed in range (a short arc in
+front of the Hunter's facing) drive the hound off — it flees and the pocket falls
+quiet. This is a benchmark stub with no health/damage model. `R` restarts the
+scene; losing window focus releases held keys.
 
 | Input                        | Action                                            |
 | ---------------------------- | ------------------------------------------------- |
 | `W` `A` `S` `D` / Arrow keys | Move (semantic actions; remappable)               |
 | `E`                          | Interact in range: cut the obstruction / pick up the fragment |
+| `Space`                      | Attack: swing the hand axe at the hound in range  |
 | `R`                          | Restart the scene                                 |
 
 Controls are read by physical key position (`event.code`) from a capture-phase
@@ -124,8 +128,8 @@ centralized in
 [`src/core/config/benchmark.ts`](./src/core/config/benchmark.ts) and marked
 temporary — not an approved game rule.
 
-**Not yet implemented:** offensive combat (attacking the hound), creature/Hunter
-damage and incapacitation, loop-completion feedback, a full inventory / item
+**Not yet implemented:** a real combat/damage model (health, Hunter damage or
+defeat), richer loop-completion / reward feedback, a full inventory / item
 identification, and all production art. These are the next increments.
 
 Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
@@ -133,8 +137,9 @@ Reproduce: `pnpm --filter @hunter-order/game-client dev`, open
 arrows — bump into and slide along the ruin walls, feel the camera lead your
 movement, head into the ruin's interior to find the ancient fragment and press
 `E` to pick it up (watch the satchel line appear), then venture toward the lower
-pocket to rouse the ruin hound — it chases and the camera tightens; back off and
-it breaks off as the view relaxes. Press `R` to restart.
+pocket to rouse the ruin hound — it chases and the camera tightens; face it and
+press `Space` to swing the axe (a couple of hits drive it off and the pocket
+falls quiet), or back off and it breaks off on its own. Press `R` to restart.
 
 ## Environment
 

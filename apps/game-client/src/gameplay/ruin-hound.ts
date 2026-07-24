@@ -18,7 +18,7 @@ import { stepPosition } from './movement';
 import { length, normalize, type Vec2 } from './vec2';
 import type { TileWorld } from './world';
 
-export type HoundMode = 'patrol' | 'chase' | 'return';
+export type HoundMode = 'patrol' | 'chase' | 'return' | 'flee';
 
 export interface HoundState {
   readonly position: Vec2;
@@ -26,6 +26,8 @@ export interface HoundState {
   readonly mode: HoundMode;
   /** Patrol waypoint the hound is currently heading toward. */
   readonly waypointIndex: number;
+  /** Successful axe hits taken this encounter; at `hitsToRepel` the hound flees. */
+  readonly hits: number;
 }
 
 /** Benchmark-only tunables (temporary values; see core/config/benchmark.ts). */
@@ -44,6 +46,10 @@ export interface RuinHoundConfig {
   readonly contactRadius: number;
   /** How close (world px) counts as having reached a waypoint/home. */
   readonly arriveEpsilon: number;
+  /** Successful axe hits needed to drive the hound off (benchmark stub). */
+  readonly hitsToRepel: number;
+  /** Speed multiplier while fleeing; defaults to 1.3 when omitted. */
+  readonly fleeSpeedMultiplier?: number;
 }
 
 const ZERO_INTENT: Vec2 = { x: 0, y: 0 };
@@ -56,12 +62,48 @@ export function createHoundState(config: RuinHoundConfig): HoundState {
     facing: DEFAULT_FACING,
     mode: 'patrol',
     waypointIndex: config.waypoints.length > 1 ? 1 : 0,
+    hits: 0,
   };
 }
 
 /** True when the Hunter is within the hound's contact radius. */
 export function houndInContact(state: HoundState, hunterPos: Vec2, config: RuinHoundConfig): boolean {
   return distance(state.position, hunterPos) <= config.contactRadius;
+}
+
+/**
+ * Records a successful axe hit. Counts the hit and, once `hitsToRepel` is reached,
+ * flips the hound to the terminal `flee` mode (a benchmark stub for
+ * "incapacitate/flee" — no health or damage model). Pure.
+ */
+export function registerHoundHit(state: HoundState, config: RuinHoundConfig): HoundState {
+  const hits = state.hits + 1;
+  const mode: HoundMode = hits >= config.hitsToRepel ? 'flee' : state.mode;
+  return { ...state, hits, mode };
+}
+
+/**
+ * True when the hound is within `range` and inside the Hunter's facing arc
+ * (`arcCos` is the cosine of the half-arc; e.g. 0.5 ≈ a 120° cone). `facingVec`
+ * must be unit-length. A hound on top of the Hunter always connects.
+ */
+export function houndInAttackReach(
+  state: HoundState,
+  hunterPos: Vec2,
+  facingVec: Vec2,
+  range: number,
+  arcCos: number,
+): boolean {
+  const to = { x: state.position.x - hunterPos.x, y: state.position.y - hunterPos.y };
+  const dist = length(to);
+  if (dist > range) {
+    return false;
+  }
+  if (dist < 1e-6) {
+    return true;
+  }
+  const dir = normalize(to);
+  return dir.x * facingVec.x + dir.y * facingVec.y >= arcCos;
 }
 
 /**
@@ -78,20 +120,28 @@ export function stepHound(
 ): HoundState {
   const distToHunter = distance(state.position, hunterPos);
 
+  // `flee` is terminal: once driven off, the hound never re-engages this encounter.
   let mode: HoundMode = state.mode;
-  if (mode === 'chase') {
-    if (distToHunter >= config.deAggroRadius) {
-      mode = 'return';
+  if (mode !== 'flee') {
+    if (mode === 'chase') {
+      if (distToHunter >= config.deAggroRadius) {
+        mode = 'return';
+      }
+    } else if (distToHunter <= config.aggroRadius) {
+      mode = 'chase';
     }
-  } else if (distToHunter <= config.aggroRadius) {
-    mode = 'chase';
   }
 
   const home = config.waypoints[0] ?? state.position;
   let waypointIndex = state.waypointIndex;
   let target: Vec2;
 
-  if (mode === 'chase') {
+  if (mode === 'flee') {
+    // Run directly away from the Hunter.
+    const away = { x: state.position.x - hunterPos.x, y: state.position.y - hunterPos.y };
+    const dir = length(away) > 1e-6 ? normalize(away) : ZERO_INTENT;
+    target = { x: state.position.x + dir.x * 1000, y: state.position.y + dir.y * 1000 };
+  } else if (mode === 'chase') {
     target = hunterPos;
   } else if (mode === 'return') {
     if (reached(state.position, home, config.arriveEpsilon)) {
@@ -111,9 +161,10 @@ export function stepHound(
     }
   }
 
+  const speed = mode === 'flee' ? config.speed * (config.fleeSpeedMultiplier ?? 1.3) : config.speed;
   const toTarget = { x: target.x - state.position.x, y: target.y - state.position.y };
   const intent = length(toTarget) > 1e-6 ? normalize(toTarget) : ZERO_INTENT;
-  const desired = stepPosition(state.position, intent, config.speed, dtSeconds);
+  const desired = stepPosition(state.position, intent, speed, dtSeconds);
   const position = resolveMovement(
     state.position,
     desired,
@@ -121,7 +172,13 @@ export function stepHound(
     world.solids,
     world.bounds,
   );
-  return { position, facing: directionFromVector(intent, state.facing), mode, waypointIndex };
+  return {
+    position,
+    facing: directionFromVector(intent, state.facing),
+    mode,
+    waypointIndex,
+    hits: state.hits,
+  };
 }
 
 function distance(a: Vec2, b: Vec2): number {

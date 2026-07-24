@@ -121,6 +121,22 @@ export const BENCHMARK = {
     deAggroRadius: 340,
     contactRadius: 40,
     arriveEpsilon: 6,
+    /** Axe hits to drive it off (benchmark stub — no health/damage model). */
+    hitsToRepel: 2,
+    /** Runs away faster than it chased. */
+    fleeSpeedMultiplier: 1.4,
+  },
+
+  /**
+   * Hand-axe attack (benchmark stub — NOT the final combat/hitbox/damage model,
+   * which is Level C). A swing connects with the hound within `attackRange` and
+   * inside a cone in front of the Hunter's facing; the cooldown paces swings.
+   */
+  combat: {
+    attackRange: 52,
+    /** Cosine of the attack half-arc: 0.5 ≈ a 120° cone. */
+    attackArcCos: 0.5,
+    attackCooldownSeconds: 0.35,
   },
 
   /**
@@ -160,6 +176,9 @@ export const BENCHMARK = {
     houndStroke: 0x6b5a48,
     // Danger vignette shown while the hound is in contact (muted red, low alpha).
     danger: 0x7a2222,
+    // Axe swing arc + the flash when a hit lands on the hound.
+    attack: 0xf0ead6,
+    hitFlash: 0xffe8a3,
     prompt: 0xf4f4ec,
   },
 } as const;
