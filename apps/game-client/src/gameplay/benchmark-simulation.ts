@@ -33,6 +33,18 @@ export interface HunterState {
   readonly facing: Direction8;
 }
 
+/**
+ * A benchmark-only, NON-AUTHORITATIVE record of something the Hunter has picked
+ * up. This is a placeholder pickup log, not an inventory system: it records only
+ * that an item was collected (its id and placeholder kind), with no counts,
+ * stacking, identification or persistence. The server remains the authority over
+ * real inventory (a future concern; see the module header).
+ */
+export interface CollectedItem {
+  readonly id: string;
+  readonly kind: string;
+}
+
 /** Benchmark-only tunables (temporary values; see core/config/benchmark.ts). */
 export interface HunterSimConfig {
   /** World units per second. */
@@ -78,6 +90,7 @@ export class BenchmarkSimulation {
   private readonly seed: readonly Interactable[];
   private interactableList: Interactable[];
   private currentTarget: Interactable | null = null;
+  private collectedList: CollectedItem[] = [];
 
   constructor(
     private readonly world: TileWorld,
@@ -103,6 +116,11 @@ export class BenchmarkSimulation {
     return this.currentTarget;
   }
 
+  /** Benchmark-only pickup log of items the Hunter has collected, in order. */
+  get collected(): readonly CollectedItem[] {
+    return this.collectedList;
+  }
+
   update(actions: ReadonlySet<MovementAction>, dtSeconds: number): void {
     const solids = [...this.world.solids, ...activeBlockingRects(this.interactableList)];
     const world: TileWorld = { ...this.world, solids };
@@ -111,8 +129,10 @@ export class BenchmarkSimulation {
   }
 
   /**
-   * Clears the current in-range target if there is one. Returns the cleared
-   * interactable (single-fire — a second call with no fresh target is a no-op).
+   * Acts on the current in-range target if there is one. An obstruction is
+   * cleared (opening the passage); a collectible is additionally recorded in the
+   * possession log. Returns the resolved interactable (single-fire — a second
+   * call with no fresh target is a no-op).
    */
   tryInteract(): Interactable | null {
     const target = this.currentTarget;
@@ -120,12 +140,16 @@ export class BenchmarkSimulation {
       return null;
     }
     this.interactableList = clearInteractable(this.interactableList, target.id);
+    if (target.collectible) {
+      this.collectedList = [...this.collectedList, { id: target.id, kind: target.kind }];
+    }
     this.recomputeTarget();
     return { ...target, state: 'cleared' };
   }
 
   reset(): void {
     this.interactableList = this.seed.map((it) => ({ ...it }));
+    this.collectedList = [];
     this.state = BenchmarkSimulation.spawnState(this.world);
     this.recomputeTarget();
   }
