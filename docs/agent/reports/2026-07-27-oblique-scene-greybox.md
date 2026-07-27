@@ -80,6 +80,26 @@ placeholders just get swapped for real tiles once PixelLab is paid.
    are occluded when north of it. Collision is unchanged (still the tile AABBs).
 4. Automated: `pnpm validate` (lint + typecheck + 157 tests + build) is green.
 
+## Follow-up fixes (same session)
+
+Review feedback: the Hunter looked like it *floated* against a wall. Two
+presentation-only fixes (collision unchanged):
+
+1. **Shadow grounding (Y-sort):** entity shadows were on a fixed low layer, so a
+   wall's oblique front face (entity depth band) drew over them and the shadow
+   vanished near walls. Shadows now sort with their owner (entity depth by feet Y,
+   just under the body) — grounded in front of walls, occluded when behind.
+2. **Extrude upward within the tile:** the front face was hanging *south* into the
+   walkable tile in front (so the Hunter stood mid-face). It now draws upward
+   within the wall's own tile (top strip + front strip), sorted by the tile's
+   south/ground edge — the ground line is the wall's south edge and a Hunter in
+   front stays cleanly on the ground. Wall height trimmed 34→30.
+
+Rationale recorded: collision must NOT follow the visual height (GD-0004 / ADR-0002
+— presentation is never a gameplay rule; Tibia also collides by tile). If chunkier
+walls are ever wanted, that's a separate *logical* collision tuning, not derived
+from the render.
+
 ## Files and evidence
 
 - Branch: `agent/oblique-scene-greybox` (from `dev`). Draft PR → `dev`.
