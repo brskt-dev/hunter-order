@@ -1,0 +1,35 @@
+{
+  "id": "creatures.ruin-hound.body",
+  "category": "creature",
+  "sizeClass": "medium",
+  "status": "review",
+  "canvas": { "width": 68, "height": 68 },
+  "pivot": { "x": 34, "y": 60 },
+  "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+  "animations": {
+    "idle": {
+      "frames": 1,
+      "note": "Per-direction static rotation frame (idle/<dir>/000.png); rendered as the at-rest pose."
+    },
+    "run": {
+      "frames": 4,
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+      "path": "run/<dir>/",
+      "note": "PixelLab template running-4-frames, 8 directions (generated manually by the GD Lead). Played by the client while the hound moves."
+    },
+    "idle-south-8f": {
+      "frames": 8,
+      "directions": ["s"],
+      "path": "anim/idle/s/",
+      "note": "PixelLab template idle, south only — earlier pipeline-branch validation artifact; not wired to the render."
+    }
+  },
+  "source": {
+    "tool": "pixellab",
+    "promptRef": "docs/art-direction/briefs/ruin-hound.md",
+    "generatedAt": "2026-07-24T18:59:00Z",
+    "editedWith": null,
+    "notes": "standard mode, quadruped template 'dog', low top-down. Fur drifted cooler/purple vs the briefed earthy brown (soft-guidance) — palette correction deferred to Aseprite."
+  },
+  "approval": { "state": "review", "reviewedBy": null, "reviewedAt": null }
+}

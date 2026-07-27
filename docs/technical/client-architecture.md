@@ -54,10 +54,10 @@ gameplay/      Phaser-free domain logic driven by scenes (pure, unit-tested):
 | `core/services/` | `Service` contract + `ServiceRegistry` (service locator seam).                           |
 | `core/context/`  | `GameContext` + `createGameContext()` (the composition root).                            |
 | `core/scenes/`   | `BaseScene` (context access) + `SceneKeys`.                                              |
-| `gameplay/`      | Phaser-free domain: movement, collision, interaction, item pickup / possession log, ruin-hound AI, axe combat (attack/repel), camera, tile world, benchmark sim. |
+| `gameplay/`      | Phaser-free domain: movement, collision, interaction, item pickup / possession log, ruin-hound AI, axe combat (attack/repel), sprite-direction mapping, camera, tile world, benchmark sim. |
 | `scenes/`        | Feature scenes (`BootScene`, `BenchmarkScene`). `index.ts` exports `sceneClasses`.       |
 | `shared/utils/`  | `assert`, `assertDefined`.                                                               |
-| `assets/`        | Bundled asset organization (see its README).                                             |
+| `assets/`        | Bundled asset organization + pipeline source frames under `source/` (review status), loaded via the benchmark art manifest (see its README).                                             |
 
 ## Composition root: `GameContext`
 

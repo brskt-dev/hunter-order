@@ -1,0 +1,16 @@
+{
+  "id": "items.fragments.ancient-fragment",
+  "category": "item",
+  "status": "review",
+  "canvas": { "width": 32, "height": 32 },
+  "pivot": { "x": 16, "y": 28 },
+  "directions": ["s"],
+  "animations": {},
+  "source": {
+    "tool": "pixellab",
+    "promptRef": "docs/art-direction/briefs/ancient-fragment.md",
+    "generatedAt": "2026-07-24T18:52:00Z",
+    "editedWith": null
+  },
+  "approval": { "state": "review", "reviewedBy": null, "reviewedAt": null }
+}
