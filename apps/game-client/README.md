@@ -127,6 +127,13 @@ live under [`src/assets/source/`](./src/assets/README.md); the pipeline is
 documented in [`tools/asset-pipeline/`](../../tools/asset-pipeline/README.md) and
 the style spec in [`docs/art-direction/`](../../docs/art-direction/README.md).
 
+**Oblique 2.5D presentation.** The scene renders in a Tibia-like oblique style
+(presentation only — collision/logic stay orthogonal, GD-0004): a tiled-floor read
+(2-tone grass + a dirt path) and walls drawn as blocks with a top face + a raised
+front face on south-exposed edges (`src/scenes/oblique-walls.ts`), depth-sorted so
+the Hunter/hound pass in front of / behind them. Colours are placeholders until
+real grass/dirt/stone tiles land (PixelLab pro tile tool — needs a paid plan).
+
 **Benchmark-only / temporary.** The client-side simulation is
 **non-authoritative** — there is no realtime server transport yet (that needs
 its own ADR; see
