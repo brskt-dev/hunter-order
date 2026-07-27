@@ -156,8 +156,10 @@ export const BENCHMARK = {
 
   /**
    * Oblique (2.5D, Tibia-like) presentation — PRESENTATION ONLY. Walls draw a
-   * flat top face plus a raised front face `wallHeight` px tall on south-exposed
-   * edges; a subtle 2-tone grass + a dirt path make the floor read as tiled.
+   * top face plus a front face `wallHeight` px tall on south-exposed edges, drawn
+   * upward *within* the wall's own tile (never into the tile in front, so the
+   * Hunter never appears to float on it); a subtle 2-tone grass + a dirt path
+   * make the floor read as tiled.
    * Collision/logic stay orthogonal on the tile AABBs (GD-0004). Placeholder
    * colours until real tiles arrive (PixelLab, paid plan).
    */

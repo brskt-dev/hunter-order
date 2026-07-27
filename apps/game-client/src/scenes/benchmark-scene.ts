@@ -372,26 +372,40 @@ export class BenchmarkScene extends BaseScene {
    */
   private drawObliqueWalls(): void {
     const { colors, tileSize, oblique } = BENCHMARK;
+    const height = oblique.wallHeight;
     const { tops, fronts } = obliqueWallTiles(BENCHMARK.solidTiles);
+    const exposed = new Set(fronts.map((c) => `${c.col},${c.row}`));
 
+    // Walls live in the entity depth band, sorted by each tile's south (ground)
+    // edge: entities in front (south) draw over them; entities behind (north) are
+    // occluded. The height is drawn UPWARD *within* the tile (a top strip + a
+    // front strip) — it never intrudes into the walkable tile in front, so a
+    // Hunter standing against a wall stays cleanly on the ground. Presentation
+    // only; collision is the logical tile AABB (GD-0004).
     for (const cell of tops) {
-      this.add
-        .rectangle(cell.col * tileSize, cell.row * tileSize, tileSize, tileSize, colors.wallTop)
-        .setOrigin(0, 0)
-        .setStrokeStyle(1, colors.wallEdge, 0.4)
-        .setDepth(DEPTH.lowObject);
-    }
-    for (const cell of fronts) {
       const x = cell.col * tileSize;
-      const faceTop = (cell.row + 1) * tileSize;
+      const y = cell.row * tileSize;
+      const depth = DEPTH.entity + (y + tileSize); // south/ground edge of the tile
+      if (!exposed.has(`${cell.col},${cell.row}`)) {
+        this.add
+          .rectangle(x, y, tileSize, tileSize, colors.wallTop)
+          .setOrigin(0, 0)
+          .setDepth(depth);
+        continue;
+      }
+      const faceY = y + tileSize - height;
       this.add
-        .rectangle(x, faceTop, tileSize, oblique.wallHeight, colors.wallFront)
+        .rectangle(x, y, tileSize, tileSize - height, colors.wallTop)
         .setOrigin(0, 0)
-        .setDepth(DEPTH.entity + faceTop);
+        .setDepth(depth);
       this.add
-        .rectangle(x, faceTop, tileSize, 2, colors.wallEdge)
+        .rectangle(x, faceY, tileSize, height, colors.wallFront)
         .setOrigin(0, 0)
-        .setDepth(DEPTH.entity + faceTop + 0.1);
+        .setDepth(depth + 0.1);
+      this.add
+        .rectangle(x, faceY, tileSize, 2, colors.wallEdge)
+        .setOrigin(0, 0)
+        .setDepth(depth + 0.2);
     }
   }
 
