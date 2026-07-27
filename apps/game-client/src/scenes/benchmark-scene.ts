@@ -234,6 +234,10 @@ export class BenchmarkScene extends BaseScene {
     this.hunter.setPosition(position.x, position.y);
     this.hunter.setDepth(DEPTH.entity + position.y); // pivot.y sorting
     this.shadow.setPosition(position.x, position.y);
+    // Sort the shadow with its owner (just under the body) so it stays grounded
+    // in front of walls the Hunter is standing before — not hidden behind their
+    // oblique front faces (which live in the entity depth band).
+    this.shadow.setDepth(DEPTH.entity + position.y - 1);
 
     const tick = directionToVector(facing);
     this.facingTick.setPosition(
@@ -255,6 +259,7 @@ export class BenchmarkScene extends BaseScene {
     this.hound.setPosition(state.position.x, state.position.y);
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
+    this.houndShadow.setDepth(DEPTH.entity + state.position.y - 1); // grounded vs walls (Y-sort)
 
     if (this.houndSprite) {
       // Moving -> play the directional run loop; at rest -> the static idle pose.

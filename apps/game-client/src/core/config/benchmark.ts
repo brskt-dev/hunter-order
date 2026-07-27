@@ -162,7 +162,7 @@ export const BENCHMARK = {
    * colours until real tiles arrive (PixelLab, paid plan).
    */
   oblique: {
-    wallHeight: 34,
+    wallHeight: 30,
     dirtTiles: [
       { col: 5, row: 5 },
       { col: 6, row: 6 },
