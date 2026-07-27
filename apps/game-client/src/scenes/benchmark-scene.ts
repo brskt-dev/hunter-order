@@ -29,6 +29,7 @@ import {
   HOUND_RUN_FRAME_COUNT,
   houndRunFrameKey,
 } from './benchmark-assets';
+import { obliqueWallTiles } from './oblique-walls';
 
 /**
  * First-playable-loop greybox — the "Overgrown Ruin" benchmark scene.
@@ -323,22 +324,30 @@ export class BenchmarkScene extends BaseScene {
   }
 
   private drawWorld(): void {
-    const { colors, tileSize } = BENCHMARK;
+    const { colors, tileSize, oblique } = BENCHMARK;
     const worldWidth = this.world.bounds.width;
     const worldHeight = this.world.bounds.height;
 
+    // Base grass fill.
     this.add
       .rectangle(0, 0, worldWidth, worldHeight, colors.ground)
       .setOrigin(0, 0)
       .setDepth(DEPTH.ground);
 
-    const grid = this.add.graphics().setDepth(DEPTH.groundDecal);
-    grid.lineStyle(1, colors.gridLine, 0.5);
-    for (let col = 0; col <= this.world.cols; col += 1) {
-      grid.lineBetween(col * tileSize, 0, col * tileSize, worldHeight);
+    // Tiled-floor read: a subtle 2-tone grass checker + a dirt path. Placeholder
+    // until real ground tiles arrive (PixelLab, paid). One Graphics, many fills.
+    const floor = this.add.graphics().setDepth(DEPTH.groundDecal);
+    floor.fillStyle(colors.groundAlt, 0.5);
+    for (let row = 0; row < this.world.rows; row += 1) {
+      for (let col = 0; col < this.world.cols; col += 1) {
+        if ((col + row) % 2 === 0) {
+          floor.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
+        }
+      }
     }
-    for (let row = 0; row <= this.world.rows; row += 1) {
-      grid.lineBetween(0, row * tileSize, worldWidth, row * tileSize);
+    floor.fillStyle(colors.dirt, 0.9);
+    for (const tile of oblique.dirtTiles) {
+      floor.fillRect(tile.col * tileSize, tile.row * tileSize, tileSize, tileSize);
     }
 
     // Subtle marker for the safe starting pocket.
@@ -346,12 +355,38 @@ export class BenchmarkScene extends BaseScene {
       .circle(this.world.spawn.x, this.world.spawn.y, tileSize * 0.4, colors.spawn, 0.25)
       .setDepth(DEPTH.groundDecal);
 
-    for (const solid of this.world.solids) {
+    this.drawObliqueWalls();
+  }
+
+  /**
+   * 2.5D walls (presentation only; collision stays the logical AABB — GD-0004).
+   * Every solid tile gets a flat top face; tiles with an empty south neighbour
+   * also get a raised front face, depth-sorted in the entity band by its base
+   * edge so the Hunter/hound pass in front of walls below them and behind walls
+   * above them. Per-tile fronts keep occlusion correct on tall walls.
+   */
+  private drawObliqueWalls(): void {
+    const { colors, tileSize, oblique } = BENCHMARK;
+    const { tops, fronts } = obliqueWallTiles(BENCHMARK.solidTiles);
+
+    for (const cell of tops) {
       this.add
-        .rectangle(solid.x, solid.y, solid.width, solid.height, colors.solid)
+        .rectangle(cell.col * tileSize, cell.row * tileSize, tileSize, tileSize, colors.wallTop)
         .setOrigin(0, 0)
-        .setStrokeStyle(2, colors.solidStroke)
+        .setStrokeStyle(1, colors.wallEdge, 0.4)
         .setDepth(DEPTH.lowObject);
+    }
+    for (const cell of fronts) {
+      const x = cell.col * tileSize;
+      const faceTop = (cell.row + 1) * tileSize;
+      this.add
+        .rectangle(x, faceTop, tileSize, oblique.wallHeight, colors.wallFront)
+        .setOrigin(0, 0)
+        .setDepth(DEPTH.entity + faceTop);
+      this.add
+        .rectangle(x, faceTop, tileSize, 2, colors.wallEdge)
+        .setOrigin(0, 0)
+        .setDepth(DEPTH.entity + faceTop + 0.1);
     }
   }
 
