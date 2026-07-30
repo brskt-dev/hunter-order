@@ -42,7 +42,8 @@ import {
   separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
-import { length, type Vec2 } from './vec2';
+import { createStandInHunter, type StandInHunterConfig, type StandInHunterState, stepStandInHunter } from './stand-in-hunter';
+import { length, normalize, type Vec2 } from './vec2';
 import type { TileWorld } from './world';
 
 export interface HunterState {
@@ -90,6 +91,39 @@ export interface AttackResult {
   readonly repelled: boolean;
   /** Index into `hounds` of the hound that was hit, or null when none was. */
   readonly hitIndex: number | null;
+  /**
+   * The swing connected with the stand-in "other player" Hunter instead of a
+   * hound (GD-0006 PvP test-bed stub — no damage model; only starts the mutual
+   * combat timer, see `pvpEngaged`). False whenever no stand-in is configured
+   * or a hound was the nearer target.
+   */
+  readonly hitOtherHunter: boolean;
+}
+
+/**
+ * Point-in-reach check for the stand-in "other player" Hunter, mirroring
+ * `houndInAttackReach` (same range/arc/point-blank rule) but against a bare
+ * position instead of a `HoundState` — the stand-in has no hound-specific
+ * fields to carry. Pure.
+ */
+function inAttackReach(
+  targetPos: Vec2,
+  fromPos: Vec2,
+  facingVec: Vec2,
+  range: number,
+  arcCos: number,
+  pointBlankRange: number,
+): boolean {
+  const to = { x: targetPos.x - fromPos.x, y: targetPos.y - fromPos.y };
+  const dist = length(to);
+  if (dist > range) {
+    return false;
+  }
+  if (dist <= pointBlankRange || dist < 1e-6) {
+    return true;
+  }
+  const dir = normalize(to);
+  return dir.x * facingVec.x + dir.y * facingVec.y >= arcCos;
 }
 
 /**
@@ -130,17 +164,32 @@ export class BenchmarkSimulation {
   private collectedList: CollectedItem[] = [];
   private houndStates: HoundState[];
   private attackCooldown = 0;
+  private otherHunterState: StandInHunterState | null;
+  /**
+   * Mutual-combat timer (GD-0006 PvP test-bed stub — no damage model): starts
+   * at `pvpCombatSeconds` when the axe connects with the stand-in and counts
+   * down to zero. While positive (`pvpEngaged`), the stand-in flees the player
+   * and Hunter↔Hunter combat separation applies.
+   */
+  private pvpTimer = 0;
 
   constructor(
     private readonly world: TileWorld,
     private readonly config: HunterSimConfig,
     interactables: readonly Interactable[] = [],
     private readonly houndConfigs: readonly RuinHoundConfig[] = [],
+    /** Stand-in "other player" Hunter tunables, or null to omit it entirely. */
+    private readonly standInConfig: StandInHunterConfig | null = null,
+    /** The stand-in's spawn point; both this and `standInConfig` must be set to spawn it. */
+    private readonly standInSpawn: Vec2 | null = null,
+    /** Seconds the mutual-combat timer stays active after hitting the stand-in. */
+    private readonly pvpCombatSeconds = 3,
   ) {
     this.seed = interactables;
     this.interactableList = interactables.map((it) => ({ ...it }));
     this.state = BenchmarkSimulation.spawnState(world);
     this.houndStates = this.houndConfigs.map((c) => createHoundState(c));
+    this.otherHunterState = BenchmarkSimulation.spawnStandIn(standInConfig, standInSpawn);
     this.recomputeTarget();
   }
 
@@ -189,13 +238,27 @@ export class BenchmarkSimulation {
     );
   }
 
+  /** The stand-in "other player" Hunter's current state, or null when none is configured. */
+  get otherHunter(): StandInHunterState | null {
+    return this.otherHunterState;
+  }
+
+  /**
+   * True while the mutual-combat timer is active (GD-0006 PvP test-bed stub):
+   * set by `tryAttack` connecting with the stand-in, it gates Hunter↔Hunter
+   * combat separation and makes the stand-in flee instead of wander.
+   */
+  get pvpEngaged(): boolean {
+    return this.pvpTimer > 0;
+  }
+
   /**
    * Candidate targets a hound may chase, nearest-first resolution is left to the
-   * caller (`nearestOf`). Just the Hunter for now; a later task appends the
-   * combat-sandbox stand-in Hunter.
+   * caller (`nearestOf`). The Hunter, plus the combat-sandbox stand-in Hunter
+   * when one is configured.
    */
   private hunterPositions(): Vec2[] {
-    return [this.state.position];
+    return [this.state.position, ...(this.otherHunterState ? [this.otherHunterState.position] : [])];
   }
 
   update(actions: ReadonlySet<MovementAction>, dtSeconds: number): void {
@@ -273,6 +336,38 @@ export class BenchmarkSimulation {
     }
     this.houndStates = hounds;
 
+    // Stand-in "other player" Hunter (GD-0006 PvP test-bed stub, no damage model):
+    // wanders when idle, flees the player while `pvpEngaged`. While engaged, it is
+    // also pushed off the player via the same soft combat separation used for
+    // hounds — only the stand-in is displaced here, re-resolved against world
+    // solids; the player (`this.state`) never moves as a result of this pass.
+    if (this.otherHunterState) {
+      let otherHunter = stepStandInHunter(
+        this.otherHunterState,
+        this.state.position,
+        this.pvpEngaged,
+        dtSeconds,
+        this.world,
+        this.standInConfig!,
+      );
+      if (this.pvpEngaged) {
+        const minDistance = this.standInConfig!.footprintRadius + this.config.footprintRadius;
+        const separated = combatSeparation(otherHunter.position, this.state.position, minDistance);
+        if (separated !== otherHunter.position) {
+          const position = resolveMovement(
+            otherHunter.position,
+            separated,
+            this.standInConfig!.footprintRadius,
+            this.world.solids,
+            this.world.bounds,
+          );
+          otherHunter = { ...otherHunter, position };
+        }
+      }
+      this.otherHunterState = otherHunter;
+    }
+    this.pvpTimer = Math.max(0, this.pvpTimer - dtSeconds);
+
     this.attackCooldown = Math.max(0, this.attackCooldown - dtSeconds);
     this.recomputeTarget();
   }
@@ -304,7 +399,7 @@ export class BenchmarkSimulation {
    */
   tryAttack(): AttackResult {
     if (this.attackCooldown > 0) {
-      return { swung: false, hit: false, repelled: false, hitIndex: null };
+      return { swung: false, hit: false, repelled: false, hitIndex: null, hitOtherHunter: false };
     }
     this.attackCooldown = this.config.attackCooldownSeconds;
 
@@ -336,12 +431,31 @@ export class BenchmarkSimulation {
         hitIndex = i;
       }
     }
-    if (hitIndex === null) {
-      return { swung: true, hit: false, repelled: false, hitIndex: null };
+    if (hitIndex !== null) {
+      const hit = registerHoundHit(this.houndStates[hitIndex], this.houndConfigs[hitIndex]);
+      this.houndStates = this.houndStates.map((h, i) => (i === hitIndex ? hit : h));
+      return { swung: true, hit: true, repelled: hit.mode === 'flee', hitIndex, hitOtherHunter: false };
     }
-    const hit = registerHoundHit(this.houndStates[hitIndex], this.houndConfigs[hitIndex]);
-    this.houndStates = this.houndStates.map((h, i) => (i === hitIndex ? hit : h));
-    return { swung: true, hit: true, repelled: hit.mode === 'flee', hitIndex };
+
+    // No hound was hit (a hound always takes priority when both are in reach):
+    // GD-0006 PvP test-bed stub — a swing that connects with the stand-in only
+    // starts the mutual-combat timer; there is no damage model.
+    if (
+      this.otherHunterState &&
+      inAttackReach(
+        this.otherHunterState.position,
+        this.state.position,
+        facing,
+        this.config.attackRange,
+        this.config.attackArcCos,
+        this.config.pointBlankRange,
+      )
+    ) {
+      this.pvpTimer = this.pvpCombatSeconds;
+      return { swung: true, hit: false, repelled: false, hitIndex: null, hitOtherHunter: true };
+    }
+
+    return { swung: true, hit: false, repelled: false, hitIndex: null, hitOtherHunter: false };
   }
 
   reset(): void {
@@ -349,6 +463,8 @@ export class BenchmarkSimulation {
     this.collectedList = [];
     this.state = BenchmarkSimulation.spawnState(this.world);
     this.houndStates = this.houndConfigs.map((c) => createHoundState(c));
+    this.otherHunterState = BenchmarkSimulation.spawnStandIn(this.standInConfig, this.standInSpawn);
+    this.pvpTimer = 0;
     this.attackCooldown = 0;
     this.recomputeTarget();
   }
@@ -363,5 +479,13 @@ export class BenchmarkSimulation {
 
   private static spawnState(world: TileWorld): HunterState {
     return { position: world.spawn, facing: DEFAULT_FACING };
+  }
+
+  /** Both `config` and `spawn` must be set to spawn the stand-in; otherwise null. */
+  private static spawnStandIn(
+    config: StandInHunterConfig | null,
+    spawn: Vec2 | null,
+  ): StandInHunterState | null {
+    return config && spawn ? createStandInHunter(spawn) : null;
   }
 }

@@ -4,6 +4,7 @@ import { BenchmarkSimulation, type HunterSimConfig, stepHunter } from './benchma
 import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
 import { type RuinHoundConfig } from './ruin-hound';
+import { type StandInHunterConfig } from './stand-in-hunter';
 import { length, vec2 } from './vec2';
 import { createTileWorld, tileCentre, type TileWorld } from './world';
 
@@ -456,5 +457,120 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
     expect(sim.hound?.mode).toBe('patrol');
     expect(sim.hound?.hits).toBe(0);
     expect(sim.tryAttack().swung).toBe(true); // cooldown was reset
+  });
+});
+
+describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP test-bed)', () => {
+  const standInConfig: StandInHunterConfig = {
+    speed: 120,
+    footprintRadius: 16,
+    wanderTurnRate: 0.8,
+    fleeSpeedMultiplier: 1.25,
+  };
+  const pvpCombatSeconds = 3;
+
+  // Due south of spawn (264, 264), well within attackRange (60) and squarely in
+  // the default south-facing arc — the Hunter can hit it without moving first.
+  const standInSpawn = vec2(264, 304);
+
+  const withStandIn = (spawn = standInSpawn): BenchmarkSimulation =>
+    new BenchmarkSimulation(openWorld(), CONFIG, [], [], standInConfig, spawn, pvpCombatSeconds);
+
+  it('has no stand-in and pvp is not engaged when none is configured', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    expect(sim.otherHunter).toBeNull();
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
+  it('spawns the stand-in Hunter at its configured spawn, not yet engaged', () => {
+    const sim = withStandIn();
+    expect(sim.otherHunter?.position).toEqual(standInSpawn);
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
+  it('wanders when idle (not engaged), without requiring an attack', () => {
+    const sim = withStandIn();
+    const before = sim.otherHunter!.position;
+    sim.update(noActions, 0.1);
+    expect(sim.otherHunter!.position).not.toEqual(before);
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
+  it('tryAttack on the in-reach stand-in engages pvp and it then flees the player', () => {
+    const sim = withStandIn();
+    const result = sim.tryAttack();
+    expect(result.hitOtherHunter).toBe(true);
+    expect(result.hitIndex).toBeNull(); // no hound was hit
+    expect(sim.pvpEngaged).toBe(true);
+
+    const before = sim.otherHunter!.position;
+    sim.update(noActions, 0.1);
+    // The player (north of the stand-in) never moved; fleeing means moving
+    // further south, away from the player.
+    expect(sim.otherHunter!.position.y).toBeGreaterThan(before.y);
+  });
+
+  it('a hound within reach wins over the stand-in (hitOtherHunter stays false)', () => {
+    const staticHound: RuinHoundConfig = {
+      speed: 0,
+      footprintRadius: 20,
+      waypoints: [vec2(264, 300)], // slightly nearer than the stand-in at (264, 304)
+      aggroRadius: 500,
+      deAggroRadius: 1000,
+      contactRadius: 40,
+      arriveEpsilon: 6,
+      hitsToRepel: 2,
+    };
+    const sim = new BenchmarkSimulation(
+      openWorld(),
+      CONFIG,
+      [],
+      [staticHound],
+      standInConfig,
+      standInSpawn,
+      pvpCombatSeconds,
+    );
+    const result = sim.tryAttack();
+    expect(result.hit).toBe(true);
+    expect(result.hitIndex).toBe(0);
+    expect(result.hitOtherHunter).toBe(false);
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
+  it('keeps the stand-in at biting distance from the player while pvp is engaged, without moving the player (GD-0006)', () => {
+    // Spawn the stand-in right on the player so combat separation must act.
+    const sim = withStandIn(vec2(264, 264));
+    sim.tryAttack();
+    expect(sim.pvpEngaged).toBe(true);
+
+    const playerBefore = sim.hunter.position;
+    for (let i = 0; i < 10; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    const minDistance = standInConfig.footprintRadius + CONFIG.footprintRadius;
+    const dist = length({
+      x: sim.otherHunter!.position.x - sim.hunter.position.x,
+      y: sim.otherHunter!.position.y - sim.hunter.position.y,
+    });
+    expect(dist).toBeGreaterThanOrEqual(minDistance - 0.5);
+    // Only the stand-in is displaced by combat separation — the player keeps authority.
+    expect(sim.hunter.position).toEqual(playerBefore);
+  });
+
+  it('pvp disengages after pvpCombatSeconds and separation stops applying', () => {
+    const sim = withStandIn();
+    sim.tryAttack();
+    expect(sim.pvpEngaged).toBe(true);
+    sim.update(noActions, pvpCombatSeconds + 0.1);
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
+  it('reset clears pvp engagement and returns the stand-in to its spawn', () => {
+    const sim = withStandIn();
+    sim.tryAttack();
+    sim.update(noActions, 0.1);
+    sim.reset();
+    expect(sim.pvpEngaged).toBe(false);
+    expect(sim.otherHunter?.position).toEqual(standInSpawn);
   });
 });
