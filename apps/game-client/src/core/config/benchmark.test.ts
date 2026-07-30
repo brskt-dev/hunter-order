@@ -126,4 +126,20 @@ describe('benchmark config', () => {
     expect(BENCHMARK.combat.pointBlankRange).toBeGreaterThan(0);
     expect(BENCHMARK.combat.pointBlankRange).toBeLessThanOrEqual(BENCHMARK.combat.attackRange);
   });
+
+  it('has a sandbox test-bed block with in-grid spawns', () => {
+    const s = BENCHMARK.sandbox;
+    expect(s.pvpCombatSeconds).toBeGreaterThan(0);
+    expect(s.otherHunter.speed).toBeGreaterThan(0);
+    for (const t of s.extraHoundTiles) {
+      expect(t.col).toBeGreaterThanOrEqual(0);
+      expect(t.row).toBeGreaterThanOrEqual(0);
+      expect(t.col).toBeLessThan(BENCHMARK.world.cols);
+      expect(t.row).toBeLessThan(BENCHMARK.world.rows);
+    }
+    if (s.otherHunterTile) {
+      expect(s.otherHunterTile.col).toBeLessThan(BENCHMARK.world.cols);
+      expect(s.otherHunterTile.row).toBeLessThan(BENCHMARK.world.rows);
+    }
+  });
 });

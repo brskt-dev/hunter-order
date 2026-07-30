@@ -191,6 +191,35 @@ export const BENCHMARK = {
   },
 
   /**
+   * Combat test-bed (BENCHMARK TEST-ONLY, non-authoritative). Populated lists turn
+   * the scene into a combat sandbox: a small pack of extra ruin hounds and a second
+   * "stand-in player" Hunter with simple AI, to exercise the GD-0006 collision model
+   * (creature↔Hunter, creature↔creature, Hunter↔Hunter in combat) and multi-target
+   * combat. Empty lists / null → the original 1-Hunter/1-hound first-playable-loop.
+   * Not part of the approved benchmark composition — a test fixture.
+   */
+  sandbox: {
+    /** Extra ruin hounds (besides BENCHMARK.hound), spawned at these tiles. */
+    extraHoundTiles: [
+      { col: 24, row: 24 },
+      { col: 22, row: 26 },
+    ],
+    /** The stand-in Hunter's spawn tile (null → no second Hunter). */
+    otherHunterTile: { col: 12, row: 12 },
+    /** Seconds a mutual-combat timer stays active after attacking the stand-in Hunter. */
+    pvpCombatSeconds: 3,
+    /** Simple-AI stand-in Hunter tunables. */
+    otherHunter: {
+      speed: 120,
+      footprintRadius: Math.round(0.33 * 48),
+      /** Radians/sec the wander heading rotates (deterministic wander). */
+      wanderTurnRate: 0.8,
+      /** Speed multiplier while fleeing the player during mutual combat. */
+      fleeSpeedMultiplier: 1.25,
+    },
+  },
+
+  /**
    * Oblique (2.5D, Tibia-like) presentation — PRESENTATION ONLY. Walls draw a
    * top face plus a front face `wallHeight` px tall on south-exposed edges, drawn
    * upward *within* the wall's own tile (never into the tile in front, so the
