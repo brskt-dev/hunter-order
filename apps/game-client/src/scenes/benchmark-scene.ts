@@ -317,7 +317,8 @@ export class BenchmarkScene extends BaseScene {
   private updateCombatCamera(intent: Vec2, dt: number): void {
     const cc = BENCHMARK.combatCamera;
     const engaged = this.sim.threatEngaged ? 1 : 0;
-    this.combatIntensity = approach(this.combatIntensity, engaged, cc.intensitySmoothing, dt);
+    const intensityRate = this.sim.threatEngaged ? cc.intensitySmoothing : cc.exitSmoothing;
+    this.combatIntensity = approach(this.combatIntensity, engaged, intensityRate, dt);
 
     this.cameras.main.setZoom(lerpScalar(cc.exploreZoom, cc.combatZoom, this.combatIntensity));
 
@@ -330,7 +331,8 @@ export class BenchmarkScene extends BaseScene {
     this.cameras.main.setFollowOffset(-(this.lookAhead.x + shakeX), -(this.lookAhead.y + shakeY));
 
     const dangerTarget = this.sim.inDanger ? DANGER_MAX_ALPHA : 0;
-    this.dangerAlpha = approach(this.dangerAlpha, dangerTarget, cc.intensitySmoothing, dt);
+    const dangerRate = this.sim.inDanger ? cc.intensitySmoothing : cc.exitSmoothing;
+    this.dangerAlpha = approach(this.dangerAlpha, dangerTarget, dangerRate, dt);
     this.dangerOverlay?.setAlpha(this.dangerAlpha);
   }
 
