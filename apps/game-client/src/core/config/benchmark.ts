@@ -265,6 +265,10 @@ export const BENCHMARK = {
     // Axe swing arc + the flash when a hit lands on the hound.
     attack: 0xf0ead6,
     hitFlash: 0xffe8a3,
+    // Combat-sandbox stand-in "other player" Hunter (GD-0006 test-bed): a cooler,
+    // distinct tone so it's never mistaken for the real Hunter at a glance.
+    otherHunter: 0x9aa8c0,
+    otherHunterFacing: 0x2c333f,
     // Oblique walls: lit top face + shaded front face + dark top edge.
     wallTop: 0x8a8690,
     wallFront: 0x4c4a52,

@@ -264,15 +264,15 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
 
   it('has no hound and no threat when none is configured', () => {
     const sim = new BenchmarkSimulation(openWorld(), CONFIG);
-    expect(sim.hound).toBeNull();
+    expect(sim.hounds.length).toBe(0);
     expect(sim.threatEngaged).toBe(false);
     expect(sim.inDanger).toBe(false);
   });
 
   it('spawns the hound patrolling at home', () => {
     const sim = withHound();
-    expect(sim.hound?.mode).toBe('patrol');
-    expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
+    expect(sim.hounds[0]?.mode).toBe('patrol');
+    expect(sim.hounds[0]?.position).toEqual({ x: 450, y: 264 });
     expect(sim.threatEngaged).toBe(false);
   });
 
@@ -303,8 +303,8 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
       sim.update(set('move-east'), 1 / 60);
     }
     sim.reset();
-    expect(sim.hound?.mode).toBe('patrol');
-    expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
+    expect(sim.hounds[0]?.mode).toBe('patrol');
+    expect(sim.hounds[0]?.position).toEqual({ x: 450, y: 264 });
     expect(sim.threatEngaged).toBe(false);
   });
 
@@ -324,7 +324,7 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     };
     const sim = new BenchmarkSimulation(world, CONFIG, [], [engagedHoundConfig]);
     sim.update(noActions, 0.1); // no movement input; hound chases onto the Hunter
-    const h = sim.hound!;
+    const h = sim.hounds[0];
     const dist = Math.hypot(
       h.position.x - sim.hunter.position.x,
       h.position.y - sim.hunter.position.y,
@@ -441,21 +441,21 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
       sim.update(noActions, 1 / 60); // hold facing, advance the attack cooldown
     }
     expect(repelled).toBe(true);
-    expect(sim.hound?.mode).toBe('flee');
+    expect(sim.hounds[0]?.mode).toBe('flee');
     expect(sim.threatEngaged).toBe(false);
   });
 
   it('reset clears combat so the hound can be fought again', () => {
     const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60);
-    for (let i = 0; i < 300 && sim.hound?.mode !== 'flee'; i += 1) {
+    for (let i = 0; i < 300 && sim.hounds[0]?.mode !== 'flee'; i += 1) {
       sim.tryAttack();
       sim.update(noActions, 1 / 60);
     }
-    expect(sim.hound?.mode).toBe('flee');
+    expect(sim.hounds[0]?.mode).toBe('flee');
     sim.reset();
-    expect(sim.hound?.mode).toBe('patrol');
-    expect(sim.hound?.hits).toBe(0);
+    expect(sim.hounds[0]?.mode).toBe('patrol');
+    expect(sim.hounds[0]?.hits).toBe(0);
     expect(sim.tryAttack().swung).toBe(true); // cooldown was reset
   });
 });

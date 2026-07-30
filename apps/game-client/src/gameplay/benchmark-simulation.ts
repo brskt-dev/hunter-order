@@ -216,16 +216,6 @@ export class BenchmarkSimulation {
     return this.houndStates;
   }
 
-  /**
-   * TEMPORARY back-compat accessor for the first hound (index 0), or null when
-   * none are configured. Existing single-hound callers (e.g. the scene's render
-   * code) read this while they migrate to `hounds`; removed once they do (a later
-   * task).
-   */
-  get hound(): HoundState | null {
-    return this.houndStates[0] ?? null;
-  }
-
   /** True while any hound is actively chasing the Hunter (drives combat camera). */
   get threatEngaged(): boolean {
     return this.houndStates.some((h) => h.mode === 'chase');
