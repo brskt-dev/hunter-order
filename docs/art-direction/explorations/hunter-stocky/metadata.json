@@ -1,0 +1,61 @@
+{
+  "id": "hunter.human.body.exploration.stocky",
+  "build": "B — stocky (second concept reference)",
+  "category": "character",
+  "status": "draft",
+  "canvas": { "width": 68, "height": 68 },
+  "pivot": null,
+  "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+  "animations": {
+    "idle": {
+      "frames": 1,
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+      "path": "idle/<dir>/",
+      "note": "Per-direction static rotation frame (the 8-dir rotation set, no animation generated)."
+    }
+  },
+  "source": {
+    "tool": "pixellab",
+    "characterId": "6f25ce18-ae44-44ab-b227-caf274032d8c",
+    "promptRef": "docs/art-direction/briefs/hunter.md",
+    "generatedAt": "2026-07-30T19:14:00Z",
+    "editedWith": null,
+    "params": {
+      "mode": "standard",
+      "bodyType": "humanoid",
+      "view": "low top-down",
+      "nDirections": 8,
+      "size": 48,
+      "detail": "medium detail",
+      "outline": "single color outline",
+      "shading": "basic shading",
+      "proportions": {
+        "type": "custom",
+        "head_size": 1.2,
+        "arms_length": 1.0,
+        "legs_length": 0.85,
+        "shoulder_width": 1.3,
+        "hip_width": 1.5
+      }
+    },
+    "notes": "Exploratory pass from the second human concept reference (heavyset build). Output canvas is 68x68 square, NOT the approved 64x80 Hunter canvas - reconciliation is Stage 3 (Aseprite) work. Deliberately kept outside apps/ : not wired to the client."
+  },
+  "measurements": {
+    "spriteHeightPx": { "min": 48, "max": 50 },
+    "spriteHeightTarget": "46-52 (reference 48)",
+    "spriteWidthPx": { "min": 17, "max": 24 },
+    "note": "Height sits inside the approved range (better than build A's 52-54). Width 24px on n/s against build A's 20px - the extra mass reads front and back, but only 17px on e/w."
+  },
+  "driftFromBrief": [
+    "The heavy build reads clearly on n/s/ne/se/sw/nw but the pure side views (e, w) are 17px wide and read closer to average - the belly silhouette is largely lost in profile.",
+    "Hood is worn UP in all 8 directions; both references have it down with the face and beard visible. Same drift as build A.",
+    "The beard is not legible at 48px; the face reads as a light skin mass.",
+    "Belt pouch, shoulder strap and forearm tattoos are not resolvable at this scale (expected).",
+    "The cream tunic reads as a bright front panel, which pulls attention to the torso more than the reference does."
+  ],
+  "comparison": {
+    "against": "hunter-lean (character 21054bb1-a532-4704-b014-8bd12e56141e)",
+    "note": "Same wardrobe language and palette drift (green brighter than the proposed moss family). Build B wins on height compliance and on carrying the belt pouch + shoulder strap that visual-direction.md asks for; build A wins on profile-view silhouette consistency."
+  },
+  "approval": { "state": "draft", "reviewedBy": null, "reviewedAt": null }
+}

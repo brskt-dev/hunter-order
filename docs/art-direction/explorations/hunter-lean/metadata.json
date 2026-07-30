@@ -1,0 +1,60 @@
+{
+  "id": "hunter.human.body.exploration.lean",
+  "build": "A — lean (first concept reference)",
+  "category": "character",
+  "status": "draft",
+  "canvas": { "width": 68, "height": 68 },
+  "pivot": null,
+  "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+  "animations": {
+    "idle": {
+      "frames": 1,
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+      "path": "idle/<dir>/",
+      "note": "Per-direction static rotation frame (the 8-dir rotation set, no animation generated)."
+    }
+  },
+  "source": {
+    "tool": "pixellab",
+    "characterId": "21054bb1-a532-4704-b014-8bd12e56141e",
+    "promptRef": "docs/art-direction/briefs/hunter.md",
+    "generatedAt": "2026-07-30T19:05:00Z",
+    "editedWith": null,
+    "params": {
+      "mode": "standard",
+      "bodyType": "humanoid",
+      "view": "low top-down",
+      "nDirections": 8,
+      "size": 48,
+      "detail": "medium detail",
+      "outline": "single color outline",
+      "shading": "basic shading",
+      "proportions": {
+        "type": "custom",
+        "head_size": 1.25,
+        "arms_length": 1.0,
+        "legs_length": 0.95,
+        "shoulder_width": 1.0,
+        "hip_width": 1.0
+      }
+    },
+    "supersedes": {
+      "characterId": "d534e805-0cdf-4302-8433-35012b44db0e",
+      "note": "First attempt at n_directions 4 (single-view scope). Discarded: the asset-spec requires 8 directions for the Hunter."
+    },
+    "notes": "Exploratory pass from a human concept reference. Output canvas is 68x68 square, NOT the approved 64x80 Hunter canvas - reconciliation is Stage 3 (Aseprite) work. Deliberately kept outside apps/ : not wired to the client."
+  },
+  "measurements": {
+    "spriteHeightPx": { "min": 52, "max": 54 },
+    "spriteHeightTarget": "46-52 (reference 48)",
+    "bboxXRange": "23-44",
+    "note": "Height runs 0-2px above the approved range; bbox is horizontally centred but drifts 1-2px per direction. Alignment/pivot calibration deferred to Aseprite."
+  },
+  "driftFromBrief": [
+    "Hood is worn UP in all 8 directions; the reference has the hood DOWN with the face and hair visible and the cowl draped over the shoulders.",
+    "Green reads brighter/more saturated than the proposed 'moss' family in several frames.",
+    "The antler/bone emblem from the reference is not legible at 48px (expected at this scale).",
+    "No belt pouch or small backpack (matches the reference, diverges from visual-direction.md)."
+  ],
+  "approval": { "state": "draft", "reviewedBy": null, "reviewedAt": null }
+}

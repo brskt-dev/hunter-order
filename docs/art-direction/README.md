@@ -27,6 +27,11 @@ own art-direction or gameplay decisions.
   parameter mapping, view/perspective, and the "soft-guidance → Aseprite" rule.
 - [`briefs/ancient-fragment.md`](briefs/ancient-fragment.md) — item-drop pilot brief.
 - [`briefs/ruin-hound.md`](briefs/ruin-hound.md) — medium-creature pilot brief.
+- [`briefs/hunter.md`](briefs/hunter.md) — player-character brief (exploratory
+  8-direction rotation pass, two builds from human concept references: lean and
+  stocky). **Which build becomes the benchmark Hunter is an open GD call.**
+- [`explorations/`](explorations/) — `draft` generations kept **outside** `apps/`:
+  not wired to the client, for art-direction review only.
 
-Briefs for the Hunter, hand axe, grass/dirt tiles, overlays and the split
-tree/ruin object are added in later passes (not yet written).
+Briefs for the hand axe, grass/dirt tiles, overlays and the split tree/ruin object
+are added in later passes (not yet written).
