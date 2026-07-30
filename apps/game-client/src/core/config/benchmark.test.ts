@@ -121,4 +121,9 @@ describe('benchmark config', () => {
     );
     expect(BENCHMARK.combatCamera.exitSmoothing).toBeGreaterThan(0);
   });
+
+  it('has a point-blank range within the attack range (GD-0006 combat feel)', () => {
+    expect(BENCHMARK.combat.pointBlankRange).toBeGreaterThan(0);
+    expect(BENCHMARK.combat.pointBlankRange).toBeLessThanOrEqual(BENCHMARK.combat.attackRange);
+  });
 });

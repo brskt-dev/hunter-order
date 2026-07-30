@@ -137,6 +137,13 @@ export const BENCHMARK = {
     /** Cosine of the attack half-arc: 0.5 ≈ a 120° cone. */
     attackArcCos: 0.5,
     attackCooldownSeconds: 0.35,
+    /**
+     * Point-blank reach (world px): a hound this close connects regardless of the
+     * Hunter's facing — forgiving when the creature is right on top of you
+     * (GD-0006 combat feel). Smaller than the biting-distance standoff, so at normal
+     * range the facing arc still gates the hit.
+     */
+    pointBlankRange: 30,
   },
 
   /**
