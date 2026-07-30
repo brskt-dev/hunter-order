@@ -39,6 +39,14 @@ export {
   stepHound,
 } from './ruin-hound';
 export { directionalFrameKey, pixelLabCardinal } from './sprite-directions';
+export {
+  decayImpact,
+  type ImpactFeel,
+  type ImpactFeelConfig,
+  isHitStopped,
+  triggerImpact,
+  zeroImpact,
+} from './impact-feel';
 export type { Vec2 } from './vec2';
 export { add, length, lerp, normalize, scale, vec2, ZERO } from './vec2';
 export type { TileRect, TileWorld, TileWorldSpec } from './world';
