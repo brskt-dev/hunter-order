@@ -1,7 +1,9 @@
 // BENCHMARK TEST-ONLY, non-authoritative: a simple stand-in "other player" Hunter for
-// the combat test-bed (GD-0006). Wanders deterministically; flees from the player while
-// a mutual combat is active. Reuses the same movement + collision primitives as the
-// Hunter, so the server can later own real PvP without discarding this slice.
+// the combat test-bed (GD-0006). Wanders deterministically; retaliates — chases the
+// player and punches (visual/timer effect only, no damage model; see
+// BenchmarkSimulation.standInStruck) — while a mutual combat is active. Reuses the
+// same movement + collision primitives as the Hunter, so the server can later own
+// real PvP without discarding this slice.
 
 import { resolveMovement } from './collision';
 import { DEFAULT_FACING, type Direction8, directionFromVector } from './direction';
@@ -19,7 +21,7 @@ export interface StandInHunterConfig {
   readonly speed: number;
   readonly footprintRadius: number;
   readonly wanderTurnRate: number;
-  readonly fleeSpeedMultiplier: number;
+  readonly combatSpeedMultiplier: number;
 }
 
 export function createStandInHunter(spawn: Vec2): StandInHunterState {
@@ -29,9 +31,11 @@ export function createStandInHunter(spawn: Vec2): StandInHunterState {
 /**
  * Advances the stand-in Hunter one step. Not in combat: wanders in a slowly
  * rotating heading (`wanderPhase`) — deterministic, no RNG, so it is testable.
- * In combat: runs directly away from the player at `fleeSpeedMultiplier` x
- * `speed`. Collides with the same world solids/bounds as the Hunter. Pure —
- * never mutates the input state.
+ * In combat: retaliates — chases directly toward the player at
+ * `combatSpeedMultiplier` x `speed` (GD-0006 stub; the sim layer resolves
+ * whether it is close enough to land a "punch", a visual/timer effect only,
+ * no damage model). Collides with the same world solids/bounds as the
+ * Hunter. Pure — never mutates the input state.
  */
 export function stepStandInHunter(
   state: StandInHunterState,
@@ -45,9 +49,9 @@ export function stepStandInHunter(
   let intent: Vec2;
   let speed = config.speed;
   if (inCombat) {
-    const away = { x: state.position.x - playerPos.x, y: state.position.y - playerPos.y };
-    intent = length(away) > 1e-6 ? normalize(away) : { x: 1, y: 0 };
-    speed = config.speed * config.fleeSpeedMultiplier;
+    const toward = { x: playerPos.x - state.position.x, y: playerPos.y - state.position.y };
+    intent = length(toward) > 1e-6 ? normalize(toward) : { x: 1, y: 0 };
+    speed = config.speed * config.combatSpeedMultiplier;
   } else {
     intent = { x: Math.cos(wanderPhase), y: Math.sin(wanderPhase) };
   }

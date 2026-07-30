@@ -214,8 +214,12 @@ export const BENCHMARK = {
       footprintRadius: Math.round(0.33 * 48),
       /** Radians/sec the wander heading rotates (deterministic wander). */
       wanderTurnRate: 0.8,
-      /** Speed multiplier while fleeing the player during mutual combat. */
-      fleeSpeedMultiplier: 1.25,
+      /** Speed multiplier while chasing the player during mutual combat. */
+      combatSpeedMultiplier: 1.0,
+      /** Melee reach (world px) of the stand-in's punch (GD-0006 stub — no damage model). */
+      attackRange: 40,
+      /** Minimum time (seconds) between the stand-in's punches. */
+      attackCooldownSeconds: 0.8,
     },
   },
 

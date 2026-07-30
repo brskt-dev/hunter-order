@@ -52,6 +52,19 @@ export interface HunterState {
 }
 
 /**
+ * Stand-in "other player" Hunter tunables, as stored by the sim: the pure-AI
+ * movement config (`StandInHunterConfig`) plus its own punch reach/pacing
+ * (GD-0006 stub — no damage model; the punch is a visual/timer effect only,
+ * rendered by the scene in a later slice).
+ */
+export interface StandInSimConfig extends StandInHunterConfig {
+  /** Melee reach (world units) of the stand-in's punch. */
+  readonly attackRange: number;
+  /** Minimum time (seconds) between the stand-in's punches. */
+  readonly attackCooldownSeconds: number;
+}
+
+/**
  * A benchmark-only, NON-AUTHORITATIVE record of something the Hunter has picked
  * up. This is a placeholder pickup log, not an inventory system: it records only
  * that an item was collected (its id and placeholder kind), with no counts,
@@ -168,10 +181,14 @@ export class BenchmarkSimulation {
   /**
    * Mutual-combat timer (GD-0006 PvP test-bed stub — no damage model): starts
    * at `pvpCombatSeconds` when the axe connects with the stand-in and counts
-   * down to zero. While positive (`pvpEngaged`), the stand-in flees the player
-   * and Hunter↔Hunter combat separation applies.
+   * down to zero. While positive (`pvpEngaged`), the stand-in chases and punches
+   * the player (retaliating) and Hunter↔Hunter combat separation applies.
    */
   private pvpTimer = 0;
+  /** Cooldown (seconds) until the stand-in can punch again (GD-0006 stub). */
+  private standInCooldown = 0;
+  /** True for exactly the frame the stand-in's punch connects — a pulse, not a state. */
+  private standInStruckThisFrame = false;
 
   constructor(
     private readonly world: TileWorld,
@@ -179,7 +196,7 @@ export class BenchmarkSimulation {
     interactables: readonly Interactable[] = [],
     private readonly houndConfigs: readonly RuinHoundConfig[] = [],
     /** Stand-in "other player" Hunter tunables, or null to omit it entirely. */
-    private readonly standInConfig: StandInHunterConfig | null = null,
+    private readonly standInConfig: StandInSimConfig | null = null,
     /** The stand-in's spawn point; both this and `standInConfig` must be set to spawn it. */
     private readonly standInSpawn: Vec2 | null = null,
     /** Seconds the mutual-combat timer stays active after hitting the stand-in. */
@@ -236,10 +253,19 @@ export class BenchmarkSimulation {
   /**
    * True while the mutual-combat timer is active (GD-0006 PvP test-bed stub):
    * set by `tryAttack` connecting with the stand-in, it gates Hunter↔Hunter
-   * combat separation and makes the stand-in flee instead of wander.
+   * combat separation and makes the stand-in chase/retaliate instead of wander.
    */
   get pvpEngaged(): boolean {
     return this.pvpTimer > 0;
+  }
+
+  /**
+   * True for exactly the frame the stand-in's punch connects (GD-0006 stub — a
+   * visual/timer effect only, no damage model). Resets to false at the start of
+   * every `update` unless that frame's punch lands again.
+   */
+  get standInStruck(): boolean {
+    return this.standInStruckThisFrame;
   }
 
   /**
@@ -327,7 +353,7 @@ export class BenchmarkSimulation {
     this.houndStates = hounds;
 
     // Stand-in "other player" Hunter (GD-0006 PvP test-bed stub, no damage model):
-    // wanders when idle, flees the player while `pvpEngaged`. While engaged, it is
+    // wanders when idle, chases/punches the player while `pvpEngaged`. While engaged, it is
     // also pushed off the player via the same soft combat separation used for
     // hounds — only the stand-in is displaced here, re-resolved against world
     // solids; the player (`this.state`) never moves as a result of this pass.
@@ -356,6 +382,30 @@ export class BenchmarkSimulation {
       }
       this.otherHunterState = otherHunter;
     }
+
+    // Stand-in's punch (GD-0006 stub — no damage model; a visual/timer effect
+    // only, rendered by the scene). Off cooldown, while pvp is engaged and the
+    // stand-in is within its own attackRange of the player, it lands a punch:
+    // a one-frame pulse (`standInStruck`) plus a refresh of the mutual-combat
+    // timer, so the stand-in's own attacks keep the fight alive. The player
+    // (`this.state`) is never moved by this.
+    this.standInCooldown = Math.max(0, this.standInCooldown - dtSeconds);
+    if (this.otherHunterState && this.standInConfig && this.pvpEngaged && this.standInCooldown <= 0) {
+      const distance = length({
+        x: this.otherHunterState.position.x - this.state.position.x,
+        y: this.otherHunterState.position.y - this.state.position.y,
+      });
+      if (distance <= this.standInConfig.attackRange) {
+        this.standInStruckThisFrame = true;
+        this.standInCooldown = this.standInConfig.attackCooldownSeconds;
+        this.pvpTimer = this.pvpCombatSeconds;
+      } else {
+        this.standInStruckThisFrame = false;
+      }
+    } else {
+      this.standInStruckThisFrame = false;
+    }
+
     this.pvpTimer = Math.max(0, this.pvpTimer - dtSeconds);
 
     this.attackCooldown = Math.max(0, this.attackCooldown - dtSeconds);
@@ -456,6 +506,8 @@ export class BenchmarkSimulation {
     this.otherHunterState = BenchmarkSimulation.spawnStandIn(this.standInConfig, this.standInSpawn);
     this.pvpTimer = 0;
     this.attackCooldown = 0;
+    this.standInCooldown = 0;
+    this.standInStruckThisFrame = false;
     this.recomputeTarget();
   }
 

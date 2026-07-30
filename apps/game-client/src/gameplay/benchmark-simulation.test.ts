@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { BenchmarkSimulation, type HunterSimConfig, stepHunter } from './benchmark-simulation';
+import {
+  BenchmarkSimulation,
+  type HunterSimConfig,
+  type StandInSimConfig,
+  stepHunter,
+} from './benchmark-simulation';
 import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
 import { type RuinHoundConfig } from './ruin-hound';
-import { type StandInHunterConfig } from './stand-in-hunter';
 import { length, vec2 } from './vec2';
 import { createTileWorld, tileCentre, type TileWorld } from './world';
 
@@ -461,11 +465,13 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
 });
 
 describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP test-bed)', () => {
-  const standInConfig: StandInHunterConfig = {
+  const standInConfig: StandInSimConfig = {
     speed: 120,
     footprintRadius: 16,
     wanderTurnRate: 0.8,
-    fleeSpeedMultiplier: 1.25,
+    combatSpeedMultiplier: 1.0,
+    attackRange: 40,
+    attackCooldownSeconds: 0.8,
   };
   const pvpCombatSeconds = 3;
 
@@ -496,7 +502,7 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(sim.pvpEngaged).toBe(false);
   });
 
-  it('tryAttack on the in-reach stand-in engages pvp and it then flees the player', () => {
+  it('tryAttack on the in-reach stand-in engages pvp and it then retaliates by chasing the player', () => {
     const sim = withStandIn();
     const result = sim.tryAttack();
     expect(result.hitOtherHunter).toBe(true);
@@ -505,9 +511,9 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
 
     const before = sim.otherHunter!.position;
     sim.update(noActions, 0.1);
-    // The player (north of the stand-in) never moved; fleeing means moving
-    // further south, away from the player.
-    expect(sim.otherHunter!.position.y).toBeGreaterThan(before.y);
+    // The player (north of the stand-in) never moved; retaliating (GD-0006 stub)
+    // means chasing toward the player — moving north, y decreases.
+    expect(sim.otherHunter!.position.y).toBeLessThan(before.y);
   });
 
   it('a hound within reach wins over the stand-in (hitOtherHunter stays false)', () => {
@@ -572,5 +578,54 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     sim.reset();
     expect(sim.pvpEngaged).toBe(false);
     expect(sim.otherHunter?.position).toEqual(standInSpawn);
+  });
+
+  it('has no punch pulse before anything has happened', () => {
+    const sim = withStandIn();
+    expect(sim.standInStruck).toBe(false);
+  });
+
+  it('punches the player once in range while engaged, refreshing the mutual-combat timer, without moving the player', () => {
+    // Within the stand-in's own attackRange (40) even before it takes a step.
+    const sim = withStandIn(vec2(264, 290));
+    const playerBefore = sim.hunter.position;
+    const engage = sim.tryAttack();
+    expect(engage.hitOtherHunter).toBe(true);
+    expect(sim.pvpEngaged).toBe(true);
+
+    sim.update(noActions, 1 / 60);
+    expect(sim.standInStruck).toBe(true);
+    expect(sim.hunter.position).toEqual(playerBefore); // player never moved
+    // The stand-in's own punch keeps the mutual-combat timer alive.
+    sim.update(noActions, pvpCombatSeconds - 0.05);
+    expect(sim.pvpEngaged).toBe(true);
+  });
+
+  it('does not punch again while its own cooldown is still active', () => {
+    const sim = withStandIn(vec2(264, 290));
+    sim.tryAttack();
+    sim.update(noActions, 1 / 60);
+    expect(sim.standInStruck).toBe(true);
+    sim.update(noActions, 1 / 60); // well within attackCooldownSeconds (0.8)
+    expect(sim.standInStruck).toBe(false);
+  });
+
+  it('does not punch while out of the stand-in attackRange', () => {
+    // Distance 50 > stand-in attackRange (40), but within the player's own
+    // attackRange (60) so tryAttack still engages pvp.
+    const sim = withStandIn(vec2(264, 314));
+    sim.tryAttack();
+    expect(sim.pvpEngaged).toBe(true);
+    sim.update(noActions, 1 / 60);
+    expect(sim.standInStruck).toBe(false);
+  });
+
+  it('reset zeroes the punch pulse and cooldown', () => {
+    const sim = withStandIn(vec2(264, 290));
+    sim.tryAttack();
+    sim.update(noActions, 1 / 60);
+    expect(sim.standInStruck).toBe(true);
+    sim.reset();
+    expect(sim.standInStruck).toBe(false);
   });
 });
