@@ -6,8 +6,10 @@ import {
   houndInAttackReach,
   houndInContact,
   type HoundState,
+  nearestOf,
   registerHoundHit,
   type RuinHoundConfig,
+  separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
 import { length, vec2 } from './vec2';
@@ -246,5 +248,40 @@ describe('combatSeparation', () => {
   it('resolves a hound coincident with the Hunter to a deterministic standoff', () => {
     const out = combatSeparation(vec2(100, 100), hunter, 36);
     expect(Math.hypot(out.x - hunter.x, out.y - hunter.y)).toBeCloseTo(36, 5);
+  });
+});
+
+describe('separatePairSymmetric', () => {
+  it('leaves a clear pair untouched (same references)', () => {
+    const a = { x: 0, y: 0 };
+    const b = { x: 50, y: 0 };
+    const [ra, rb] = separatePairSymmetric(a, b, 36);
+    expect(ra).toBe(a);
+    expect(rb).toBe(b);
+  });
+
+  it('pushes an overlapping pair apart to exactly minDistance, symmetrically', () => {
+    const a = { x: 10, y: 0 };
+    const b = { x: 20, y: 0 }; // 10 apart along +x
+    const [ra, rb] = separatePairSymmetric(a, b, 36);
+    expect(Math.hypot(ra.x - rb.x, ra.y - rb.y)).toBeCloseTo(36, 5);
+    // symmetric: each moved 13 (half of 26 overlap); a goes -x, b goes +x
+    expect(ra.x).toBeCloseTo(-3, 5);
+    expect(rb.x).toBeCloseTo(33, 5);
+  });
+
+  it('resolves a coincident pair deterministically along +x', () => {
+    const [ra, rb] = separatePairSymmetric({ x: 5, y: 5 }, { x: 5, y: 5 }, 36);
+    expect(Math.hypot(ra.x - rb.x, ra.y - rb.y)).toBeCloseTo(36, 5);
+  });
+});
+
+describe('nearestOf', () => {
+  it('returns null for an empty list', () => {
+    expect(nearestOf({ x: 0, y: 0 }, [])).toBeNull();
+  });
+  it('returns the nearest point', () => {
+    const near = { x: 1, y: 0 };
+    expect(nearestOf({ x: 0, y: 0 }, [{ x: 10, y: 0 }, near, { x: 5, y: 5 }])).toBe(near);
   });
 });

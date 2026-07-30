@@ -132,6 +132,40 @@ export function combatSeparation(houndPos: Vec2, hunterPos: Vec2, minDistance: n
 }
 
 /**
+ * Symmetric soft push-apart for two engaged bodies (GD-0006 creature↔creature): each
+ * is moved half the overlap along their shared centre line, so neither acts as a hard
+ * wall and the outcome is order-independent. A pair already at/beyond `minDistance` is
+ * returned unchanged (same references). Pure; caller re-resolves against world solids.
+ */
+export function separatePairSymmetric(a: Vec2, b: Vec2, minDistance: number): [Vec2, Vec2] {
+  const delta = { x: a.x - b.x, y: a.y - b.y };
+  const d = length(delta);
+  if (d >= minDistance) {
+    return [a, b];
+  }
+  const dir = d < 1e-6 ? { x: 1, y: 0 } : normalize(delta);
+  const push = (minDistance - d) / 2;
+  return [
+    { x: a.x + dir.x * push, y: a.y + dir.y * push },
+    { x: b.x - dir.x * push, y: b.y - dir.y * push },
+  ];
+}
+
+/** The nearest point in `points` to `from`, or null when `points` is empty. Pure. */
+export function nearestOf(from: Vec2, points: readonly Vec2[]): Vec2 | null {
+  let best: Vec2 | null = null;
+  let bestD = Infinity;
+  for (const p of points) {
+    const d = (p.x - from.x) ** 2 + (p.y - from.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
  * Advances the hound one step: resolve the mode transition (with hysteresis),
  * pick a target, move toward it (colliding with the same world solids/bounds as
  * the Hunter) and update facing. Pure — never mutates the input state.

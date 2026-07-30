@@ -43,8 +43,10 @@ export {
   houndInContact,
   type HoundMode,
   type HoundState,
+  nearestOf,
   registerHoundHit,
   type RuinHoundConfig,
+  separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
 export { directionalFrameKey, pixelLabCardinal } from './sprite-directions';
