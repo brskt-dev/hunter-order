@@ -20,7 +20,8 @@ from the [`Game Constitution`](../vision/game-constitution.md) and
 
 Covered: visual perspective; spatial logic; continuous movement; eight-direction
 orientation; server authority; walk and run; speed modifiers; scenario collision;
-absence of collision between mobile entities; contextual interaction; perception
+absence of collision between mobile entities outside combat (see GD-0006); contextual
+interaction; perception
 states; keyboard and mouse controls; camera follow; look-ahead; combat zoom.
 
 Not covered (future blocks): full combat and damage formulas; creature
@@ -42,8 +43,10 @@ definitive speed/zoom values; controls for other platforms.
   detected or identified. The client predicts and smooths but never decides the
   definitive state.
 - **Readability over physical realism.** No body blocking between Hunters, NPCs and
-  creatures. Tactical positioning comes from terrain, range, line of sight, areas
-  of effect and distance — not from using bodies as walls.
+  creatures **outside combat**. Tactical positioning comes from terrain, range, line of
+  sight, areas of effect and distance — not from using bodies as walls. *(Amended by
+  [GD-0006](../decisions/GD-0006-circumstantial-entity-collision.md): entities in combat
+  do separate via a soft push-apart — see the Collision section.)*
 - **Exploration without automatic understanding.** An entity may be visually
   present without being detected or identified.
 - **Contextual camera.** The camera adapts to context without constant manual
@@ -141,10 +144,16 @@ characters into permanent obstacles to one another.
 
 - **Blocks movement:** walls, rocks, trees, buildings, fixed obstacles, physical
   limits and elements explicitly configured as solid (controlled by world data).
-- **Does not block movement:** any pair among Hunter / NPC / creature. Mobile
-  entities may overlap in the simulation. **There is no body blocking** — no player
-  can trap others or block a doorway with their body; passage never depends on
+- **Does not block movement (outside combat):** any pair among Hunter / NPC / creature.
+  Mobile entities may overlap in the simulation. **There is no body blocking** — no
+  player can trap others or block a doorway with their body; passage never depends on
   update order.
+- **Circumstantial combat collision** ([GD-0006](../decisions/GD-0006-circumstantial-entity-collision.md)):
+  while entities are *in combat*, they separate via a **soft push-apart** (not a rigid
+  wall). Hunter↔creature applies for the duration of an encounter; Hunter↔Hunter applies
+  only in mutual combat. It is symmetric (order-independent) and soft, so it still never
+  hard-traps anyone or fully blocks a passage — the anti-griefing goal above holds. The
+  server owns combat state and resolves the separation (ADR-0002).
 - **Tactical positioning** still exists through range, cover, line of sight,
   obstacles, dangerous areas, control zones, terrain, travel time and area effects
   (defined by the combat block).
