@@ -1,0 +1,35 @@
+{
+  "id": "characters.hunter.bruno-dentes.body",
+  "category": "character",
+  "status": "review",
+  "canvas": { "width": 68, "height": 68 },
+  "pivot": { "x": 34, "y": 60 },
+  "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+  "animations": {
+    "idle": {
+      "frames": 1,
+      "note": "Per-direction static rotation frame (idle/<dir>/000.png); rendered as the at-rest pose."
+    },
+    "run": {
+      "frames": 4,
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
+      "path": "run/<dir>/",
+      "note": "PixelLab template running-4-frames, 8 directions (generated manually by the GD Lead)."
+    },
+    "punch": {
+      "frames": 6,
+      "directions": ["s", "se", "sw"],
+      "path": "punch/<dir>/",
+      "note": "PixelLab template cross-punch; other directions (n, ne, e, nw, w) failed to generate on the PixelLab trial due to heavy load — complete later."
+    }
+  },
+  "source": {
+    "tool": "pixellab",
+    "characterId": "21054bb1-a532-4704-b014-8bd12e56141e",
+    "promptRef": "docs/art-direction/briefs/hunter-benchmark.md",
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "editedWith": null,
+    "notes": "generated manually by the GD Lead; 68x68 vs the 64x80 Hunter spec — benchmark art."
+  },
+  "approval": { "state": "review", "reviewedBy": null, "reviewedAt": null }
+}
