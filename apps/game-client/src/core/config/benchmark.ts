@@ -152,6 +152,35 @@ export const BENCHMARK = {
     lookAheadCombatScale: 0.4,
     /** Engagement smoothing rate (per second); drives zoom + look-ahead + danger. */
     intensitySmoothing: 4,
+    /** Engage eases in at `intensitySmoothing`; disengage eases out gentler. */
+    exitSmoothing: 2.5,
+  },
+
+  /**
+   * Feel-pass juice (PRESENTATION ONLY — GD-0004). Decaying envelopes applied to
+   * the camera and the hound sprite when the hand-axe lands a hit; a pickup pop
+   * on the fragment. "Contido/tátil": short, bounded, self-decaying. None of this
+   * touches logical position, range, perception or the combat model. Benchmark-only.
+   */
+  feel: {
+    /** Visual micro-hold on the hound at impact (seconds). */
+    hitStopSeconds: 0.05,
+    /** Max camera render offset at full shake (world px). Small on purpose. */
+    shakePeakPx: 3,
+    /** Exponential decay rate of the shake envelope (per second). */
+    shakeDecayRate: 9,
+    /** Oscillation frequency of the shake offset (rad/s-ish). */
+    shakeFrequency: 60,
+    /** Exponential decay rate of the impact-flash envelope (per second). */
+    flashDecayRate: 8,
+    /** Max hound VISUAL recoil offset (world px) — never the logical position. */
+    recoilPeakPx: 6,
+    /** Exponential decay rate of the recoil envelope (per second). */
+    recoilDecayRate: 12,
+    /** Fragment pickup pop peak scale. */
+    pickupPopScale: 1.15,
+    /** Fragment pickup pop + fade duration (ms). */
+    pickupPopMs: 180,
   },
 
   /**

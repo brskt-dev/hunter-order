@@ -93,4 +93,32 @@ describe('benchmark config', () => {
     expect(BENCHMARK.combat.attackArcCos).toBeGreaterThanOrEqual(-1);
     expect(BENCHMARK.combat.attackArcCos).toBeLessThanOrEqual(1);
   });
+
+  it('has restrained, positive feel tunables', () => {
+    const f = BENCHMARK.feel;
+    for (const v of [
+      f.hitStopSeconds,
+      f.shakePeakPx,
+      f.shakeDecayRate,
+      f.shakeFrequency,
+      f.flashDecayRate,
+      f.recoilPeakPx,
+      f.recoilDecayRate,
+      f.pickupPopMs,
+    ]) {
+      expect(v).toBeGreaterThan(0);
+    }
+    // Restrained: a hit-stop micro-hold, a few px of shake, a small pop.
+    expect(f.hitStopSeconds).toBeLessThanOrEqual(0.12);
+    expect(f.shakePeakPx).toBeLessThanOrEqual(6);
+    expect(f.pickupPopScale).toBeGreaterThan(1);
+    expect(f.pickupPopScale).toBeLessThanOrEqual(1.4);
+  });
+
+  it('eases combat camera out no faster than it eases in (gentle recover)', () => {
+    expect(BENCHMARK.combatCamera.exitSmoothing).toBeLessThanOrEqual(
+      BENCHMARK.combatCamera.intensitySmoothing,
+    );
+    expect(BENCHMARK.combatCamera.exitSmoothing).toBeGreaterThan(0);
+  });
 });
