@@ -44,6 +44,13 @@ import {
   playerRunFrameKey,
   PUNCH_FRAME_COUNT,
   RUN_FRAME_COUNT,
+  TEST_ART,
+  TEST_IDLE_BASE,
+  TEST_PUNCH_BASE,
+  TEST_PUNCH_DIRS,
+  TEST_RUN_BASE,
+  testPunchFrameKey,
+  testRunFrameKey,
 } from './benchmark-assets';
 import { obliqueWallTiles } from './oblique-walls';
 
@@ -140,7 +147,17 @@ interface HoundView {
 interface StandInView {
   container: Phaser.GameObjects.Container;
   shadow: Phaser.GameObjects.Ellipse;
-  facingTick: Phaser.GameObjects.Rectangle;
+  /** Greybox fallback facing tick; undefined when the real TEST sprite is used. */
+  facingTick?: Phaser.GameObjects.Rectangle;
+  /** Real directional TEST Hunter sprite; undefined when falling back to the greybox. */
+  sprite?: Phaser.GameObjects.Sprite;
+}
+
+/** The PvP "EM COMBATE" indicator (ring + label) that floats above the stand-in
+ * only while `sim.pvpEngaged` (GD-0006 test-bed). */
+interface CombatMarkerView {
+  ring: Phaser.GameObjects.Arc;
+  label: Phaser.GameObjects.Text;
 }
 
 export class BenchmarkScene extends BaseScene {
@@ -171,6 +188,13 @@ export class BenchmarkScene extends BaseScene {
    * (the hound the axe actually connected with), or null when none. */
   private recoilHoundIndex: number | null = null;
   private standIn?: StandInView;
+  /** True once the TEST Hunter run frames loaded, mirroring `playerRunReady`. */
+  private standInRunReady = false;
+  /** True while the stand-in's punch animation is playing — holds the pose
+   * (mirrors `playerPunching`); cleared on `animationcomplete`. */
+  private standInPunching = false;
+  private standInPrev?: Vec2;
+  private combatMarker?: CombatMarkerView;
   private dangerOverlay?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
@@ -244,6 +268,12 @@ export class BenchmarkScene extends BaseScene {
     // pointing at the pre-restart position (a spurious first-frame "moving").
     this.playerPunching = false;
     this.playerPrev = undefined;
+    // Reset the stand-in sprite's transient state too (same reason): a restart
+    // mid-punch or mid-chase must not leave `standInPunching` stuck or
+    // `standInPrev` pointing at the pre-restart position.
+    this.standInRunReady = false;
+    this.standInPunching = false;
+    this.standInPrev = undefined;
     this.interactableViews.clear();
 
     this.drawWorld();
@@ -252,6 +282,7 @@ export class BenchmarkScene extends BaseScene {
     this.createHunter();
     this.registerHoundAnimations();
     this.createHounds();
+    this.registerTestAnimations();
     this.createStandIn();
     this.createPrompt();
     this.setupCamera();
@@ -305,6 +336,14 @@ export class BenchmarkScene extends BaseScene {
 
     const actions = movementActionsFromCodes(this.pressedCodes);
     this.sim.update(actions, dt);
+
+    // `standInStruck` is a ONE-FRAME pulse (never latched) — the stand-in landed
+    // its punch on the player this frame (GD-0006 stub, visual/timer effect only,
+    // no damage model). React immediately: the stand-in's punch pose + a brief
+    // hit-flash on the player.
+    if (this.sim.standInStruck) {
+      this.handleStandInStruck();
+    }
 
     if (this.interactQueued) {
       this.interactQueued = false;
@@ -422,8 +461,12 @@ export class BenchmarkScene extends BaseScene {
     }
   }
 
-  /** Mirrors the stand-in Hunter's logical state onto its container + shadow
-   * (GD-0006 test-bed), the same way `update()` does for the real Hunter. */
+  /**
+   * Mirrors the stand-in Hunter's logical state onto its container + shadow
+   * (GD-0006 test-bed), the same way `update()` does for the real Hunter —
+   * plus the run/idle/punch sprite choice `renderPlayer` makes for the player,
+   * and the "EM COMBATE" marker while `sim.pvpEngaged`.
+   */
   private renderStandIn(): void {
     const state = this.sim.otherHunter;
     if (!state || !this.standIn) {
@@ -435,11 +478,50 @@ export class BenchmarkScene extends BaseScene {
     this.standIn.shadow.setPosition(position.x, position.y);
     this.standIn.shadow.setDepth(DEPTH.entity + position.y - 1); // grounded vs walls (Y-sort)
 
-    const tick = directionToVector(facing);
-    this.standIn.facingTick.setPosition(
-      tick.x * FACING_TICK_RADIUS,
-      -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
-    );
+    const moving = this.standInPrev
+      ? Math.hypot(position.x - this.standInPrev.x, position.y - this.standInPrev.y) > 0.05
+      : false;
+    this.standInPrev = position;
+
+    if (this.standIn.sprite) {
+      if (!this.standInPunching) {
+        if (moving && this.standInRunReady) {
+          this.standIn.sprite.play(directionalFrameKey(TEST_RUN_BASE, facing), true);
+        } else {
+          this.standIn.sprite.stop();
+          const idleKey = directionalFrameKey(TEST_IDLE_BASE, facing);
+          if (this.textures.exists(idleKey)) {
+            this.standIn.sprite.setTexture(idleKey);
+          }
+        }
+      }
+    } else if (this.standIn.facingTick) {
+      const tick = directionToVector(facing);
+      this.standIn.facingTick.setPosition(
+        tick.x * FACING_TICK_RADIUS,
+        -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
+      );
+    }
+
+    this.renderCombatMarker(position);
+  }
+
+  /** Positions/shows the "EM COMBATE" ring + label above the stand-in only
+   * while `sim.pvpEngaged`; hidden otherwise (GD-0006 test-bed). */
+  private renderCombatMarker(position: Vec2): void {
+    const marker = this.combatMarker;
+    if (!marker) {
+      return;
+    }
+    const engaged = this.sim.pvpEngaged;
+    marker.ring.setVisible(engaged);
+    marker.label.setVisible(engaged);
+    if (!engaged) {
+      return;
+    }
+    const markerY = position.y - BODY_HEIGHT - 12;
+    marker.ring.setPosition(position.x, markerY);
+    marker.label.setPosition(position.x, markerY - 10);
   }
 
   /**
@@ -783,11 +865,53 @@ export class BenchmarkScene extends BaseScene {
     return { container, shadow, flash, sprite, facingTick };
   }
 
+  /** True when the real TEST Hunter (Eduardo, the stand-in) idle art loaded
+   * (else render the greybox), mirroring `playerArtReady`. */
+  private testArtReady(): boolean {
+    return this.textures.exists(directionalFrameKey(TEST_IDLE_BASE, 's'));
+  }
+
   /**
-   * The combat-sandbox stand-in "other player" Hunter (GD-0006 test-bed): a
-   * Hunter-style container in a distinct colour + its own runtime shadow +
-   * facing tick, mirroring `createHunter`. Omitted entirely when no stand-in
-   * is configured (`sim.otherHunter` is null).
+   * Registers the TEST Hunter's run (all 8 dirs, looping) and punch
+   * (`TEST_PUNCH_DIRS` only, non-looping) animations — mirrors
+   * `registerPlayerAnimations`.
+   */
+  private registerTestAnimations(): void {
+    if (!this.testArtReady() || !this.textures.exists(testRunFrameKey('s', 0))) {
+      return;
+    }
+    const dirs: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    for (const dir of dirs) {
+      const key = directionalFrameKey(TEST_RUN_BASE, dir);
+      if (this.anims.exists(key)) {
+        continue; // shared across scene restarts
+      }
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < RUN_FRAME_COUNT; i += 1) {
+        frames.push({ key: testRunFrameKey(dir, i) });
+      }
+      this.anims.create({ key, frames, frameRate: 9, repeat: -1 });
+    }
+
+    for (const dir of TEST_PUNCH_DIRS) {
+      const key = directionalFrameKey(TEST_PUNCH_BASE, dir);
+      if (this.anims.exists(key) || !this.textures.exists(testPunchFrameKey(dir, 0))) {
+        continue;
+      }
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < PUNCH_FRAME_COUNT; i += 1) {
+        frames.push({ key: testPunchFrameKey(dir, i) });
+      }
+      this.anims.create({ key, frames, frameRate: 12, repeat: 0 });
+    }
+  }
+
+  /**
+   * The combat-sandbox stand-in "other player" Hunter (GD-0006 test-bed): the
+   * real Eduardo sprite (idle/run/punch) when its art loaded, mirroring
+   * `createHunter`, else the greybox distinct-colour Hunter + facing tick.
+   * Also builds the "EM COMBATE" marker that floats above it. Omitted
+   * entirely when no stand-in is configured (`sim.otherHunter` is null).
    */
   private createStandIn(): void {
     const state = this.sim.otherHunter;
@@ -802,22 +926,64 @@ export class BenchmarkScene extends BaseScene {
       .ellipse(position.x, position.y, footprintRadius * 2, footprintRadius, colors.footprint, 0.5)
       .setDepth(DEPTH.shadow);
 
-    const body = this.add
-      .rectangle(0, -BODY_HEIGHT / 2, BODY_WIDTH, BODY_HEIGHT, colors.otherHunter)
-      .setStrokeStyle(1, 0x000000, 0.4);
-    const facingTick = this.add.rectangle(
-      0,
-      -BODY_HEIGHT * 0.6 + FACING_TICK_RADIUS,
-      FACING_TICK_SIZE,
-      FACING_TICK_SIZE,
-      colors.otherHunterFacing,
-    );
+    let sprite: Phaser.GameObjects.Sprite | undefined;
+    let facingTick: Phaser.GameObjects.Rectangle | undefined;
+    let children: Phaser.GameObjects.GameObject[];
+    if (this.testArtReady()) {
+      // Real sprite; feet-pivot aligned to the container origin (logical position).
+      this.standInRunReady = this.textures.exists(testRunFrameKey('s', 0));
+      sprite = this.add
+        .sprite(0, 0, directionalFrameKey(TEST_IDLE_BASE, state.facing))
+        .setOrigin(0.5, TEST_ART.pivotY / TEST_ART.canvas.height);
+      sprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+        if (anim.key.startsWith(TEST_PUNCH_BASE)) {
+          this.standInPunching = false;
+        }
+      });
+      children = [sprite];
+    } else {
+      const body = this.add
+        .rectangle(0, -BODY_HEIGHT / 2, BODY_WIDTH, BODY_HEIGHT, colors.otherHunter)
+        .setStrokeStyle(1, 0x000000, 0.4);
+      facingTick = this.add.rectangle(
+        0,
+        -BODY_HEIGHT * 0.6 + FACING_TICK_RADIUS,
+        FACING_TICK_SIZE,
+        FACING_TICK_SIZE,
+        colors.otherHunterFacing,
+      );
+      children = [body, facingTick];
+    }
 
     const container = this.add
-      .container(position.x, position.y, [body, facingTick])
+      .container(position.x, position.y, children)
       .setDepth(DEPTH.entity + position.y);
 
-    this.standIn = { container, shadow, facingTick };
+    this.standIn = { container, shadow, sprite, facingTick };
+    this.createCombatMarker();
+  }
+
+  /** Builds the (initially hidden) "EM COMBATE" ring + label shown above the
+   * stand-in only while `sim.pvpEngaged` (GD-0006 test-bed, world-space UI). */
+  private createCombatMarker(): void {
+    const { combatMarker } = BENCHMARK.colors;
+    const ring = this.add
+      .circle(0, 0, 10, combatMarker, 0)
+      .setStrokeStyle(2, combatMarker, 1)
+      .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+    const label = this.add
+      .text(0, 0, 'EM COMBATE', {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: cssHex(combatMarker),
+        backgroundColor: 'rgba(12,15,12,0.75)',
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+    this.combatMarker = { ring, label };
   }
 
   // Screen-fixed red vignette shown while the hound is in contact. Oversized and
@@ -1007,6 +1173,63 @@ export class BenchmarkScene extends BaseScene {
     }
     this.playerPunching = true;
     this.playerSprite.play(key, true);
+  }
+
+  /**
+   * Reacts to the stand-in landing its punch on the player this frame
+   * (`sim.standInStruck`, a one-frame pulse — GD-0006 stub, visual/timer effect
+   * only, no damage model): plays the stand-in's punch pose and flashes the
+   * player. Never touches logical state.
+   */
+  private handleStandInStruck(): void {
+    const state = this.sim.otherHunter;
+    if (state) {
+      this.startStandInPunch(state.facing);
+    }
+    this.showPlayerHitFlash();
+  }
+
+  /**
+   * Starts the stand-in's punch pose, picking the nearest covered direction to
+   * its current facing — mirrors `startPlayerPunch`. Held via `standInPunching`
+   * until `animationcomplete` releases it back to run/idle in `renderStandIn`.
+   * No-op for the greybox fallback or if the punch animation isn't registered.
+   */
+  private startStandInPunch(facing: Direction8): void {
+    const sprite = this.standIn?.sprite;
+    if (!sprite) {
+      return;
+    }
+    const dir = nearestCoveredDirection(facing, TEST_PUNCH_DIRS);
+    const key = directionalFrameKey(TEST_PUNCH_BASE, dir);
+    if (!this.anims.exists(key)) {
+      return;
+    }
+    this.standInPunching = true;
+    sprite.play(key, true);
+  }
+
+  /** A brief, restrained flash over the player Hunter where the stand-in's punch
+   * lands, so the hit reads as connecting — the same tween'd-overlay idiom as
+   * `showCutFeedback`, on the effect layer above the Hunter. */
+  private showPlayerHitFlash(): void {
+    const { position } = this.sim.hunter;
+    const flash = this.add
+      .ellipse(
+        position.x,
+        position.y - BODY_HEIGHT * 0.55,
+        BODY_WIDTH * 1.15,
+        BODY_HEIGHT * 0.9,
+        BENCHMARK.colors.hitFlash,
+        0.75,
+      )
+      .setDepth(DEPTH.effect);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 220,
+      onComplete: () => flash.destroy(),
+    });
   }
 
   /** A brief axe-swing arc in front of the Hunter's facing (transient effect). */

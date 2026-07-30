@@ -273,6 +273,9 @@ export const BENCHMARK = {
     // distinct tone so it's never mistaken for the real Hunter at a glance.
     otherHunter: 0x9aa8c0,
     otherHunterFacing: 0x2c333f,
+    // PvP combat indicator (GD-0006 test-bed): a restrained accent for the ring +
+    // "EM COMBATE" label shown above the stand-in only while mutual combat is active.
+    combatMarker: 0xe0a34a,
     // Oblique walls: lit top face + shaded front face + dark top edge.
     wallTop: 0x8a8690,
     wallFront: 0x4c4a52,
