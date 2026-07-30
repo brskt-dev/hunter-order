@@ -172,7 +172,7 @@ export const BENCHMARK = {
   feel: {
     /** Visual micro-hold on the hound at impact (seconds). */
     hitStopSeconds: 0.09,
-    /** Max camera render offset at full shake (world px). Small on purpose. */
+    /** Max camera render offset at full shake (world px). Kept small/bounded. */
     shakePeakPx: 8,
     /** Exponential decay rate of the shake envelope (per second). */
     shakeDecayRate: 7,
