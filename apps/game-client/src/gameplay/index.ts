@@ -17,6 +17,14 @@ export { resolveMovement } from './collision';
 export type { Direction8 } from './direction';
 export { DEFAULT_FACING, directionFromVector, directionToVector } from './direction';
 export {
+  decayImpact,
+  type ImpactFeel,
+  type ImpactFeelConfig,
+  isHitStopped,
+  triggerImpact,
+  zeroImpact,
+} from './impact-feel';
+export {
   activeBlockingRects,
   clearInteractable,
   distanceToBounds,

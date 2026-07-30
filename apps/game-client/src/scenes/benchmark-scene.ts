@@ -4,19 +4,24 @@ import {
   BenchmarkSimulation,
   clampDeltaSeconds,
   createTileWorld,
+  decayImpact,
   type Direction8,
   directionalFrameKey,
   directionToVector,
+  type ImpactFeel,
   intentFromActions,
   type Interactable,
+  isHitStopped,
   lookAheadTarget,
   movementActionsFromCodes,
   type RuinHoundConfig,
   smoothTowards,
   tileCentre,
   type TileWorld,
+  triggerImpact,
   type Vec2,
   ZERO,
+  zeroImpact,
 } from '@gameplay';
 import Phaser from 'phaser';
 
@@ -132,6 +137,10 @@ export class BenchmarkScene extends BaseScene {
   private lookAhead: Vec2 = ZERO;
   private combatIntensity = 0;
   private dangerAlpha = 0;
+  private impact: ImpactFeel = zeroImpact();
+  private recoilDir: Vec2 = ZERO;
+  private shakeClock = 0;
+  private houndFlash?: Phaser.GameObjects.Ellipse;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -173,6 +182,10 @@ export class BenchmarkScene extends BaseScene {
     this.lookAhead = ZERO;
     this.combatIntensity = 0;
     this.dangerAlpha = 0;
+    this.impact = zeroImpact();
+    this.recoilDir = ZERO;
+    this.shakeClock = 0;
+    this.houndFlash = undefined;
     this.attackQueued = false;
     this.interactableViews.clear();
 
@@ -210,6 +223,8 @@ export class BenchmarkScene extends BaseScene {
       return;
     }
     const dt = clampDeltaSeconds(delta, BENCHMARK.movement.maxDeltaSeconds);
+    this.impact = decayImpact(this.impact, dt, BENCHMARK.feel);
+    this.shakeClock += dt;
 
     if (this.restartQueued) {
       this.restartQueued = false;
@@ -256,12 +271,17 @@ export class BenchmarkScene extends BaseScene {
     if (!state || !this.hound || !this.houndShadow) {
       return;
     }
-    this.hound.setPosition(state.position.x, state.position.y);
+    const recoil = BENCHMARK.feel.recoilPeakPx * this.impact.recoil;
+    this.hound.setPosition(
+      state.position.x + this.recoilDir.x * recoil,
+      state.position.y + this.recoilDir.y * recoil,
+    );
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
     this.houndShadow.setDepth(DEPTH.entity + state.position.y - 1); // grounded vs walls (Y-sort)
+    this.houndFlash?.setAlpha(this.impact.flash * 0.85);
 
-    if (this.houndSprite) {
+    if (this.houndSprite && !isHitStopped(this.impact)) {
       // Moving -> play the directional run loop; at rest -> the static idle pose.
       const moving = this.houndPrev
         ? Math.hypot(
@@ -279,7 +299,7 @@ export class BenchmarkScene extends BaseScene {
           this.houndSprite.setTexture(idleKey);
         }
       }
-    } else if (this.houndFacingTick) {
+    } else if (!this.houndSprite && this.houndFacingTick) {
       const tick = directionToVector(state.facing);
       this.houndFacingTick.setPosition(
         tick.x * HOUND_TICK_RADIUS,
@@ -297,17 +317,22 @@ export class BenchmarkScene extends BaseScene {
   private updateCombatCamera(intent: Vec2, dt: number): void {
     const cc = BENCHMARK.combatCamera;
     const engaged = this.sim.threatEngaged ? 1 : 0;
-    this.combatIntensity = approach(this.combatIntensity, engaged, cc.intensitySmoothing, dt);
+    const intensityRate = this.sim.threatEngaged ? cc.intensitySmoothing : cc.exitSmoothing;
+    this.combatIntensity = approach(this.combatIntensity, engaged, intensityRate, dt);
 
     this.cameras.main.setZoom(lerpScalar(cc.exploreZoom, cc.combatZoom, this.combatIntensity));
 
     const laScale = lerpScalar(1, cc.lookAheadCombatScale, this.combatIntensity);
     const target = lookAheadTarget(intent, BENCHMARK.camera.lookAheadDistance * laScale);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
-    this.cameras.main.setFollowOffset(-this.lookAhead.x, -this.lookAhead.y);
+    const shakeMag = BENCHMARK.feel.shakePeakPx * this.impact.shake;
+    const shakeX = shakeMag * Math.sin(this.shakeClock * BENCHMARK.feel.shakeFrequency);
+    const shakeY = shakeMag * Math.sin(this.shakeClock * BENCHMARK.feel.shakeFrequency * 1.3 + 1.7);
+    this.cameras.main.setFollowOffset(-(this.lookAhead.x + shakeX), -(this.lookAhead.y + shakeY));
 
     const dangerTarget = this.sim.inDanger ? DANGER_MAX_ALPHA : 0;
-    this.dangerAlpha = approach(this.dangerAlpha, dangerTarget, cc.intensitySmoothing, dt);
+    const dangerRate = this.sim.inDanger ? cc.intensitySmoothing : cc.exitSmoothing;
+    this.dangerAlpha = approach(this.dangerAlpha, dangerTarget, dangerRate, dt);
     this.dangerOverlay?.setAlpha(this.dangerAlpha);
   }
 
@@ -529,6 +554,12 @@ export class BenchmarkScene extends BaseScene {
       )
       .setDepth(DEPTH.shadow);
 
+    // Envelope-driven hit flash (alpha set each frame in renderHound). A container
+    // child so it rides the body — including the recoil offset.
+    this.houndFlash = this.add
+      .ellipse(0, -HOUND_BODY_HEIGHT * 0.4, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hitFlash, 1)
+      .setAlpha(0);
+
     let children: Phaser.GameObjects.GameObject[];
     if (this.houndArtReady()) {
       // Real sprite; feet-pivot aligned to the container origin (logical position).
@@ -537,7 +568,7 @@ export class BenchmarkScene extends BaseScene {
       this.houndSprite = this.add
         .sprite(0, 0, directionalFrameKey(HOUND_IDLE_BASE, state.facing))
         .setOrigin(0.5, HOUND_ART.pivotY / HOUND_ART.canvas.height);
-      children = [this.houndSprite];
+      children = [this.houndSprite, this.houndFlash];
     } else {
       const body = this.add
         .rectangle(0, -HOUND_BODY_HEIGHT / 2, HOUND_BODY_WIDTH, HOUND_BODY_HEIGHT, colors.hound)
@@ -549,7 +580,7 @@ export class BenchmarkScene extends BaseScene {
         HOUND_TICK_SIZE,
         colors.houndStroke,
       );
-      children = [body, this.houndFacingTick];
+      children = [body, this.houndFacingTick, this.houndFlash];
     }
 
     this.hound = this.add
@@ -667,19 +698,34 @@ export class BenchmarkScene extends BaseScene {
       return;
     }
     const view = this.interactableViews.get(resolved.id);
-    if (view) {
-      this.tweens.add({
-        targets: view,
-        alpha: 0,
-        duration: 180,
-        onComplete: () => view.setVisible(false),
-      });
-    }
     if (resolved.collectible) {
+      // A small pop + fade "trace" on the fragment as it is taken (not a loot burst).
+      if (view) {
+        const pop = BENCHMARK.feel.pickupPopScale;
+        this.tweens.add({
+          targets: view,
+          scaleX: pop,
+          scaleY: pop,
+          alpha: 0,
+          duration: BENCHMARK.feel.pickupPopMs,
+          ease: 'Quad.easeOut',
+          onComplete: () => view.setVisible(false),
+        });
+      }
       this.showDiscovery(DISCOVERY_MESSAGE[resolved.kind] ?? 'You found something.');
       this.updatePossession();
       this.log.info('Benchmark pickup: collected item', resolved.id);
     } else {
+      // The axe-cut reads as a connected hit: a brief chop flash as the overgrowth clears.
+      if (view) {
+        this.tweens.add({
+          targets: view,
+          alpha: 0,
+          duration: 180,
+          onComplete: () => view.setVisible(false),
+        });
+      }
+      this.showCutFeedback(resolved);
       this.log.info('Benchmark interaction: cleared obstruction', resolved.id);
     }
   }
@@ -691,13 +737,20 @@ export class BenchmarkScene extends BaseScene {
     }
     this.showSwing();
     if (result.hit) {
-      this.flashHound();
+      this.registerHit();
     }
     if (result.repelled) {
       this.showDiscovery('The ruin hound is driven off — the pocket falls quiet.');
       this.fadeOutHound();
       this.log.info('Benchmark combat: ruin hound repelled (benchmark stub)');
     }
+  }
+
+  /** Presentation-only hit feedback: peak the juice envelopes + capture the recoil
+   * direction (the Hunter's facing). Never touches logical state (GD-0004). */
+  private registerHit(): void {
+    this.impact = triggerImpact(this.impact, BENCHMARK.feel);
+    this.recoilDir = directionToVector(this.sim.hunter.facing);
   }
 
   /** A brief axe-swing arc in front of the Hunter's facing (transient effect). */
@@ -726,26 +779,19 @@ export class BenchmarkScene extends BaseScene {
     });
   }
 
-  /** A quick bright flash on the hound to read a landed hit. */
-  private flashHound(): void {
-    const state = this.sim.hound;
-    if (!state) {
-      return;
-    }
+  /** A brief, restrained flash where overgrowth is cut, so the axe reads as connecting. */
+  private showCutFeedback(target: Interactable): void {
+    const cx = target.bounds.x + target.bounds.width / 2;
+    const cy = target.bounds.y + target.bounds.height / 2;
     const flash = this.add
-      .ellipse(
-        state.position.x,
-        state.position.y - HOUND_BODY_HEIGHT * 0.4,
-        HOUND_BODY_WIDTH,
-        HOUND_BODY_HEIGHT,
-        BENCHMARK.colors.hitFlash,
-        0.85,
-      )
+      .rectangle(cx, cy, target.bounds.width * 0.9, target.bounds.height * 0.9, BENCHMARK.colors.hitFlash, 0.5)
       .setDepth(DEPTH.effect);
     this.tweens.add({
       targets: flash,
       alpha: 0,
-      duration: 150,
+      scaleX: 0.7,
+      scaleY: 0.7,
+      duration: 160,
       onComplete: () => flash.destroy(),
     });
   }
