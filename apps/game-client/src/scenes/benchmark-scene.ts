@@ -15,6 +15,7 @@ import {
   isHitStopped,
   lookAheadTarget,
   movementActionsFromCodes,
+  nearestCoveredDirection,
   type RuinHoundConfig,
   smoothTowards,
   tileCentre,
@@ -34,6 +35,15 @@ import {
   HOUND_RUN_BASE,
   HOUND_RUN_FRAME_COUNT,
   houndRunFrameKey,
+  PLAYER_ART,
+  PLAYER_IDLE_BASE,
+  PLAYER_PUNCH_BASE,
+  PLAYER_PUNCH_DIRS,
+  PLAYER_RUN_BASE,
+  playerPunchFrameKey,
+  playerRunFrameKey,
+  PUNCH_FRAME_COUNT,
+  RUN_FRAME_COUNT,
 } from './benchmark-assets';
 import { obliqueWallTiles } from './oblique-walls';
 
@@ -138,7 +148,17 @@ export class BenchmarkScene extends BaseScene {
   private sim!: BenchmarkSimulation;
   private hunter!: Phaser.GameObjects.Container;
   private shadow!: Phaser.GameObjects.Ellipse;
-  private facingTick!: Phaser.GameObjects.Rectangle;
+  /** Fallback greybox facing tick; undefined when the real player sprite is used
+   * (the sprite itself conveys facing). */
+  private facingTick?: Phaser.GameObjects.Rectangle;
+  /** Real directional Hunter sprite; undefined when falling back to the greybox. */
+  private playerSprite?: Phaser.GameObjects.Sprite;
+  /** True once the player run frames loaded, mirroring `houndRunReady`. */
+  private playerRunReady = false;
+  /** True while a punch animation is playing — holds the pose instead of
+   * switching to run/idle each frame (cleared on `animationcomplete`). */
+  private playerPunching = false;
+  private playerPrev?: Vec2;
   private prompt?: Phaser.GameObjects.Text;
   private satchel?: Phaser.GameObjects.Text;
   private readonly interactableViews = new Map<
@@ -219,10 +239,16 @@ export class BenchmarkScene extends BaseScene {
     this.shakeClock = 0;
     this.recoilHoundIndex = null;
     this.attackQueued = false;
+    // Reset the player-sprite transient state too, so a scene restart mid-punch
+    // doesn't leave `playerPunching` stuck (freezing idle/run) or `playerPrev`
+    // pointing at the pre-restart position (a spurious first-frame "moving").
+    this.playerPunching = false;
+    this.playerPrev = undefined;
     this.interactableViews.clear();
 
     this.drawWorld();
     this.drawInteractables(interactables);
+    this.registerPlayerAnimations();
     this.createHunter();
     this.registerHoundAnimations();
     this.createHounds();
@@ -299,16 +325,49 @@ export class BenchmarkScene extends BaseScene {
     // oblique front faces (which live in the entity depth band).
     this.shadow.setDepth(DEPTH.entity + position.y - 1);
 
-    const tick = directionToVector(facing);
-    this.facingTick.setPosition(
-      tick.x * FACING_TICK_RADIUS,
-      -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
-    );
+    this.renderPlayer(position, facing);
 
     this.updatePrompt();
     this.renderHounds();
     this.renderStandIn();
     this.updateCombatCamera(intentFromActions(actions), dt);
+  }
+
+  /**
+   * Mirrors the Hunter's facing/movement onto the real sprite (run while
+   * moving, idle at rest, held during a punch) or the greybox facing tick —
+   * the same choice `renderHounds` makes per hound. A punch in progress
+   * (`playerPunching`) is left alone here; it releases on `animationcomplete`.
+   */
+  private renderPlayer(position: Vec2, facing: Direction8): void {
+    const moving = this.playerPrev
+      ? Math.hypot(position.x - this.playerPrev.x, position.y - this.playerPrev.y) > 0.05
+      : false;
+    this.playerPrev = position;
+
+    if (this.playerSprite) {
+      if (this.playerPunching) {
+        return; // hold the punch pose; released by the animationcomplete handler
+      }
+      if (moving && this.playerRunReady) {
+        this.playerSprite.play(directionalFrameKey(PLAYER_RUN_BASE, facing), true);
+        return;
+      }
+      this.playerSprite.stop();
+      const idleKey = directionalFrameKey(PLAYER_IDLE_BASE, facing);
+      if (this.textures.exists(idleKey)) {
+        this.playerSprite.setTexture(idleKey);
+      }
+      return;
+    }
+
+    if (this.facingTick) {
+      const tick = directionToVector(facing);
+      this.facingTick.setPosition(
+        tick.x * FACING_TICK_RADIUS,
+        -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
+      );
+    }
   }
 
   /**
@@ -561,20 +620,76 @@ export class BenchmarkScene extends BaseScene {
       )
       .setDepth(DEPTH.shadow);
 
-    const body = this.add
-      .rectangle(0, -BODY_HEIGHT / 2, BODY_WIDTH, BODY_HEIGHT, colors.hunter)
-      .setStrokeStyle(1, 0x000000, 0.4);
-    this.facingTick = this.add.rectangle(
-      0,
-      -BODY_HEIGHT * 0.6 + FACING_TICK_RADIUS,
-      FACING_TICK_SIZE,
-      FACING_TICK_SIZE,
-      colors.hunterFacing,
-    );
+    let children: Phaser.GameObjects.GameObject[];
+    if (this.playerArtReady()) {
+      // Real sprite; feet-pivot aligned to the container origin (logical position).
+      // It conveys facing directly, so the greybox facing tick is dropped.
+      this.playerRunReady = this.textures.exists(playerRunFrameKey('s', 0));
+      this.playerSprite = this.add
+        .sprite(0, 0, directionalFrameKey(PLAYER_IDLE_BASE, this.sim.hunter.facing))
+        .setOrigin(0.5, PLAYER_ART.pivotY / PLAYER_ART.canvas.height);
+      this.playerSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+        if (anim.key.startsWith(PLAYER_PUNCH_BASE)) {
+          this.playerPunching = false;
+        }
+      });
+      children = [this.playerSprite];
+    } else {
+      const body = this.add
+        .rectangle(0, -BODY_HEIGHT / 2, BODY_WIDTH, BODY_HEIGHT, colors.hunter)
+        .setStrokeStyle(1, 0x000000, 0.4);
+      this.facingTick = this.add.rectangle(
+        0,
+        -BODY_HEIGHT * 0.6 + FACING_TICK_RADIUS,
+        FACING_TICK_SIZE,
+        FACING_TICK_SIZE,
+        colors.hunterFacing,
+      );
+      children = [body, this.facingTick];
+    }
 
     this.hunter = this.add
-      .container(spawn.x, spawn.y, [body, this.facingTick])
+      .container(spawn.x, spawn.y, children)
       .setDepth(DEPTH.entity + spawn.y);
+  }
+
+  /** True when the real PLAYER Hunter idle art loaded (else render the greybox). */
+  private playerArtReady(): boolean {
+    return this.textures.exists(directionalFrameKey(PLAYER_IDLE_BASE, 's'));
+  }
+
+  /**
+   * Registers the PLAYER Hunter's run (all 8 dirs, looping) and punch (covered
+   * dirs only, non-looping) animations — mirrors `registerHoundAnimations`.
+   */
+  private registerPlayerAnimations(): void {
+    if (!this.playerArtReady() || !this.textures.exists(playerRunFrameKey('s', 0))) {
+      return;
+    }
+    const dirs: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    for (const dir of dirs) {
+      const key = directionalFrameKey(PLAYER_RUN_BASE, dir);
+      if (this.anims.exists(key)) {
+        continue; // shared across scene restarts
+      }
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < RUN_FRAME_COUNT; i += 1) {
+        frames.push({ key: playerRunFrameKey(dir, i) });
+      }
+      this.anims.create({ key, frames, frameRate: 9, repeat: -1 });
+    }
+
+    for (const dir of PLAYER_PUNCH_DIRS) {
+      const key = directionalFrameKey(PLAYER_PUNCH_BASE, dir);
+      if (this.anims.exists(key) || !this.textures.exists(playerPunchFrameKey(dir, 0))) {
+        continue;
+      }
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < PUNCH_FRAME_COUNT; i += 1) {
+        frames.push({ key: playerPunchFrameKey(dir, i) });
+      }
+      this.anims.create({ key, frames, frameRate: 12, repeat: 0 });
+    }
   }
 
   /** True when the real ruin-hound idle art loaded (else render the primitive). */
@@ -853,6 +968,7 @@ export class BenchmarkScene extends BaseScene {
       return; // still on cooldown
     }
     this.showSwing();
+    this.startPlayerPunch();
     if (result.hit) {
       this.registerHit(result.hitIndex);
     }
@@ -871,6 +987,26 @@ export class BenchmarkScene extends BaseScene {
     this.impact = triggerImpact(this.impact, BENCHMARK.feel);
     this.recoilDir = directionToVector(this.sim.hunter.facing);
     this.recoilHoundIndex = hitIndex;
+  }
+
+  /**
+   * Starts the player's punch pose on a connecting/whiffed swing alike (any
+   * `result.swung`), picking the nearest covered direction to the Hunter's
+   * current facing. Held via `playerPunching` until `animationcomplete`
+   * releases it back to run/idle in `renderPlayer`. No-op for the greybox
+   * fallback or if the punch animation somehow isn't registered.
+   */
+  private startPlayerPunch(): void {
+    if (!this.playerSprite) {
+      return;
+    }
+    const dir = nearestCoveredDirection(this.sim.hunter.facing, PLAYER_PUNCH_DIRS);
+    const key = directionalFrameKey(PLAYER_PUNCH_BASE, dir);
+    if (!this.anims.exists(key)) {
+      return;
+    }
+    this.playerPunching = true;
+    this.playerSprite.play(key, true);
   }
 
   /** A brief axe-swing arc in front of the Hunter's facing (transient effect). */
