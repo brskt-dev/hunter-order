@@ -17,6 +17,14 @@ export { resolveMovement } from './collision';
 export type { Direction8 } from './direction';
 export { DEFAULT_FACING, directionFromVector, directionToVector } from './direction';
 export {
+  decayImpact,
+  type ImpactFeel,
+  type ImpactFeelConfig,
+  isHitStopped,
+  triggerImpact,
+  zeroImpact,
+} from './impact-feel';
+export {
   activeBlockingRects,
   clearInteractable,
   distanceToBounds,
@@ -39,14 +47,6 @@ export {
   stepHound,
 } from './ruin-hound';
 export { directionalFrameKey, pixelLabCardinal } from './sprite-directions';
-export {
-  decayImpact,
-  type ImpactFeel,
-  type ImpactFeelConfig,
-  isHitStopped,
-  triggerImpact,
-  zeroImpact,
-} from './impact-feel';
 export type { Vec2 } from './vec2';
 export { add, length, lerp, normalize, scale, vec2, ZERO } from './vec2';
 export type { TileRect, TileWorld, TileWorldSpec } from './world';
