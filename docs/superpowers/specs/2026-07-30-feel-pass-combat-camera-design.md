@@ -121,7 +121,9 @@ smoothing already in the codebase.
   its current frame (visual only — the simulation keeps advancing; input stays live).
 - **Recoil:** offset the **hound sprite render position** by
   `recoilDir * recoilPeakPx * impact.recoil`. The hound's logical `state.position` is
-  never touched; the shadow follows the same visual offset so it stays grounded.
+  never touched; the shadow stays pinned to the logical `state.position` (it marks
+  the true position while the body recoils, which reads as a jolt and keeps game
+  state transparent — GD-0004).
 - **Camera shake:** add a bounded offset to the camera each frame,
   `offset = shakePeakPx * impact.shake * f(t)` where `f` is a small decaying oscillation
   (deterministic; e.g. `sin(elapsed * shakeFrequency)` for x and a phase-shifted sin for
