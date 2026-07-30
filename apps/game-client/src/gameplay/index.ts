@@ -49,7 +49,7 @@ export {
   separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
-export { directionalFrameKey, pixelLabCardinal } from './sprite-directions';
+export { directionalFrameKey, nearestCoveredDirection, pixelLabCardinal } from './sprite-directions';
 export {
   createStandInHunter,
   type StandInHunterConfig,
