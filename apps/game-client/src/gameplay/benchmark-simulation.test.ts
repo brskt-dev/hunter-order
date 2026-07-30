@@ -14,6 +14,7 @@ const CONFIG: HunterSimConfig = {
   attackRange: 60,
   attackArcCos: 0.5,
   attackCooldownSeconds: 0.35,
+  pointBlankRange: 30,
 };
 
 // An overgrowth obstruction just east of the open-world spawn (x=264): its left
@@ -304,6 +305,32 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     expect(sim.hound?.mode).toBe('patrol');
     expect(sim.hound?.position).toEqual({ x: 450, y: 264 });
     expect(sim.threatEngaged).toBe(false);
+  });
+
+  it('keeps an engaged hound at biting distance instead of stacking on the Hunter (GD-0006)', () => {
+    const world = openWorld();
+    const spawn = world.spawn;
+    const engagedHoundConfig: RuinHoundConfig = {
+      speed: 118,
+      footprintRadius: 20,
+      waypoints: [spawn, spawn], // starts on the Hunter
+      aggroRadius: 1000, // immediately chases
+      deAggroRadius: 2000,
+      contactRadius: 40,
+      arriveEpsilon: 6,
+      hitsToRepel: 2,
+      fleeSpeedMultiplier: 1.4,
+    };
+    const sim = new BenchmarkSimulation(world, CONFIG, [], engagedHoundConfig);
+    sim.update(noActions, 0.1); // no movement input; hound chases onto the Hunter
+    const h = sim.hound!;
+    const dist = Math.hypot(
+      h.position.x - sim.hunter.position.x,
+      h.position.y - sim.hunter.position.y,
+    );
+    const minDistance = engagedHoundConfig.footprintRadius + CONFIG.footprintRadius; // 20 + 16
+    expect(h.mode).toBe('chase');
+    expect(dist).toBeGreaterThanOrEqual(minDistance - 0.5);
   });
 });
 

@@ -175,6 +175,7 @@ export class BenchmarkScene extends BaseScene {
         attackRange: BENCHMARK.combat.attackRange,
         attackArcCos: BENCHMARK.combat.attackArcCos,
         attackCooldownSeconds: BENCHMARK.combat.attackCooldownSeconds,
+        pointBlankRange: BENCHMARK.combat.pointBlankRange,
       },
       interactables,
       this.buildHoundConfig(),

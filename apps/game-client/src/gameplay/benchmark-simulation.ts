@@ -31,6 +31,7 @@ import {
 import { stepPosition } from './movement';
 import { intentFromActions, type MovementAction } from './movement-intent';
 import {
+  combatSeparation,
   createHoundState,
   houndInAttackReach,
   houndInContact,
@@ -73,6 +74,8 @@ export interface HunterSimConfig {
   readonly attackArcCos: number;
   /** Minimum time (seconds) between axe swings. */
   readonly attackCooldownSeconds: number;
+  /** Within this distance, an axe swing connects regardless of facing (GD-0006). */
+  readonly pointBlankRange: number;
 }
 
 /** Outcome of an axe swing (benchmark stub — no damage model). */
@@ -181,13 +184,32 @@ export class BenchmarkSimulation {
     // The hound chases the Hunter's updated position and collides with the static
     // world only (it ignores clearable obstructions — a deliberate stub simplification).
     if (this.houndState && this.houndConfig) {
-      this.houndState = stepHound(
+      let hound = stepHound(
         this.houndState,
         this.state.position,
         dtSeconds,
         this.world,
         this.houndConfig,
       );
+      // GD-0006: while engaged (in combat), the hound and Hunter collide via a soft
+      // push-apart so the hound holds at biting distance instead of stacking on the
+      // Hunter's centre. Benchmark scope: only the hound is displaced (the player keeps
+      // authority over its own position); out of combat there is no separation.
+      if (hound.mode === 'chase') {
+        const minDistance = this.houndConfig.footprintRadius + this.config.footprintRadius;
+        const separated = combatSeparation(hound.position, this.state.position, minDistance);
+        if (separated !== hound.position) {
+          const position = resolveMovement(
+            hound.position,
+            separated,
+            this.houndConfig.footprintRadius,
+            this.world.solids,
+            this.world.bounds,
+          );
+          hound = { ...hound, position };
+        }
+      }
+      this.houndState = hound;
     }
     this.attackCooldown = Math.max(0, this.attackCooldown - dtSeconds);
     this.recomputeTarget();
@@ -233,6 +255,7 @@ export class BenchmarkSimulation {
       facing,
       this.config.attackRange,
       this.config.attackArcCos,
+      this.config.pointBlankRange,
     );
     if (!inReach) {
       return { swung: true, hit: false, repelled: false };
