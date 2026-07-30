@@ -5,7 +5,7 @@ import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
 import { type RuinHoundConfig } from './ruin-hound';
 import { length, vec2 } from './vec2';
-import { createTileWorld, type TileWorld } from './world';
+import { createTileWorld, tileCentre, type TileWorld } from './world';
 
 const CONFIG: HunterSimConfig = {
   speed: 140,
@@ -259,7 +259,7 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
   });
 
   const withHound = (): BenchmarkSimulation =>
-    new BenchmarkSimulation(openWorld(), CONFIG, [], houndConfig());
+    new BenchmarkSimulation(openWorld(), CONFIG, [], [houndConfig()]);
 
   it('has no hound and no threat when none is configured', () => {
     const sim = new BenchmarkSimulation(openWorld(), CONFIG);
@@ -321,7 +321,7 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
       hitsToRepel: 2,
       fleeSpeedMultiplier: 1.4,
     };
-    const sim = new BenchmarkSimulation(world, CONFIG, [], engagedHoundConfig);
+    const sim = new BenchmarkSimulation(world, CONFIG, [], [engagedHoundConfig]);
     sim.update(noActions, 0.1); // no movement input; hound chases onto the Hunter
     const h = sim.hound!;
     const dist = Math.hypot(
@@ -331,6 +331,69 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     const minDistance = engagedHoundConfig.footprintRadius + CONFIG.footprintRadius; // 20 + 16
     expect(h.mode).toBe('chase');
     expect(dist).toBeGreaterThanOrEqual(minDistance - 0.5);
+  });
+});
+
+describe('BenchmarkSimulation — multiple hounds (GD-0006 pack)', () => {
+  it('steps multiple hounds; each holds at biting distance and none stack on each other', () => {
+    const world = openWorld();
+    // The open world's spawn tile is (5, 5) — see `openWorld` above.
+    const mk = (col: number, row: number): RuinHoundConfig => ({
+      speed: 118,
+      footprintRadius: 20,
+      waypoints: [
+        tileCentre(col, row, world.tileSize),
+        tileCentre(col, row, world.tileSize),
+      ],
+      aggroRadius: 1000, // immediately chases
+      deAggroRadius: 2000,
+      contactRadius: 40,
+      arriveEpsilon: 6,
+      hitsToRepel: 2,
+      fleeSpeedMultiplier: 1.4,
+    });
+    // Two hounds spawned on top of the Hunter (and each other) — both chase
+    // immediately and must separate from the Hunter AND from each other.
+    const sim = new BenchmarkSimulation(world, CONFIG, [], [mk(5, 5), mk(5, 5)]);
+    sim.update(noActions, 0.1);
+    const [h0, h1] = sim.hounds;
+    const pairDist = Math.hypot(h0.position.x - h1.position.x, h0.position.y - h1.position.y);
+    expect(sim.hounds.length).toBe(2);
+    expect(h0.mode).toBe('chase');
+    expect(h1.mode).toBe('chase');
+    expect(pairDist).toBeGreaterThan(1); // creature<->creature separation kicked in
+  });
+
+  it('tryAttack hits the nearest in-reach hound and reports its index', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [
+      // Far hound, still in reach; near hound is the one that should be hit.
+      {
+        speed: 0,
+        footprintRadius: 20,
+        waypoints: [vec2(310, 264)],
+        aggroRadius: 500,
+        deAggroRadius: 1000,
+        contactRadius: 40,
+        arriveEpsilon: 6,
+        hitsToRepel: 2,
+      },
+      {
+        speed: 0,
+        footprintRadius: 20,
+        waypoints: [vec2(300, 264)],
+        aggroRadius: 500,
+        deAggroRadius: 1000,
+        contactRadius: 40,
+        arriveEpsilon: 6,
+        hitsToRepel: 2,
+      },
+    ]);
+    sim.update(set('move-east'), 1 / 60); // face east toward both hounds
+    const result = sim.tryAttack();
+    expect(result.hit).toBe(true);
+    expect(result.hitIndex).toBe(1); // hound[1] (x=300) is nearer than hound[0] (x=310)
+    expect(sim.hounds[1].hits).toBe(1);
+    expect(sim.hounds[0].hits).toBe(0);
   });
 });
 
@@ -354,17 +417,20 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
     expect(r.swung).toBe(true);
     expect(r.hit).toBe(false);
     expect(r.repelled).toBe(false);
+    expect(r.hitIndex).toBeNull();
   });
 
   it('does not connect a second time while on cooldown', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60); // face east toward the hound, within reach
-    expect(sim.tryAttack().hit).toBe(true);
+    const first = sim.tryAttack();
+    expect(first.hit).toBe(true);
+    expect(first.hitIndex).toBe(0);
     expect(sim.tryAttack().swung).toBe(false); // still cooling down
   });
 
   it('drives the hound off (flee) after enough hits in reach', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60); // face east toward the hound
     let repelled = false;
     for (let i = 0; i < 300 && !repelled; i += 1) {
@@ -379,7 +445,7 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
   });
 
   it('reset clears combat so the hound can be fought again', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], staticHound());
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60);
     for (let i = 0; i < 300 && sim.hound?.mode !== 'flee'; i += 1) {
       sim.tryAttack();

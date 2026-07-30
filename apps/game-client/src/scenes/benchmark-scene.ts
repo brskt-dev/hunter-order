@@ -178,7 +178,7 @@ export class BenchmarkScene extends BaseScene {
         pointBlankRange: BENCHMARK.combat.pointBlankRange,
       },
       interactables,
-      this.buildHoundConfig(),
+      this.buildHoundConfigs(),
     );
     this.lookAhead = ZERO;
     this.combatIntensity = 0;
@@ -203,20 +203,32 @@ export class BenchmarkScene extends BaseScene {
     this.createDangerOverlay();
   }
 
-  private buildHoundConfig(): RuinHoundConfig {
+  /**
+   * The primary "ruin hound" (BENCHMARK.hound) plus one extra hound per
+   * `BENCHMARK.sandbox.extraHoundTiles` — same tunables, but that tile becomes
+   * its home/patrol point (a combat-sandbox test fixture, GD-0006; see the
+   * config's own doc comment). An empty `extraHoundTiles` reproduces the
+   * original 1-hound first-playable-loop.
+   */
+  private buildHoundConfigs(): RuinHoundConfig[] {
     const ts = BENCHMARK.tileSize;
     const h = BENCHMARK.hound;
-    return {
+    const withWaypoints = (waypoints: Vec2[]): RuinHoundConfig => ({
       speed: h.speed,
       footprintRadius: h.footprintRadius,
-      waypoints: h.patrolTiles.map((t) => tileCentre(t.col, t.row, ts)),
+      waypoints,
       aggroRadius: h.aggroRadius,
       deAggroRadius: h.deAggroRadius,
       contactRadius: h.contactRadius,
       arriveEpsilon: h.arriveEpsilon,
       hitsToRepel: h.hitsToRepel,
       fleeSpeedMultiplier: h.fleeSpeedMultiplier,
-    };
+    });
+    const primary = withWaypoints(h.patrolTiles.map((t) => tileCentre(t.col, t.row, ts)));
+    const extras = BENCHMARK.sandbox.extraHoundTiles.map((t) =>
+      withWaypoints([tileCentre(t.col, t.row, ts)]),
+    );
+    return [primary, ...extras];
   }
 
   override update(_time: number, delta: number): void {
