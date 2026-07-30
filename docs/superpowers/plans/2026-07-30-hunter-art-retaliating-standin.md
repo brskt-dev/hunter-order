@@ -1,0 +1,218 @@
+# Hunter art + retaliating stand-in Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
+
+**Goal:** Give the player Hunter and the test-bed stand-in Hunter real PixelLab art (idle + run + punch), make Space play a punch, change the stand-in from *fleeing* to *retaliating* (chase + punch, no damage), and add a clear on-screen PvP combat indicator.
+
+**Architecture:** Two new review-status character assets (`Hunter Bruno Dentes` = player, `Hunter Eduardo Careca` = stand-in) are downloaded into the source tree and exposed through the existing benchmark art manifest with greybox fallback. A pure `nearestCoveredDirection` helper maps a facing to the nearest *available* punch direction (punch art is only partial). The stand-in's AI flips flee→chase and gains a benchmark-stub attack (plays punch + flashes the player + refreshes the mutual-combat timer, no damage). The scene renders both Hunters as directional sprites (idle/run/punch) and draws a combat marker + label over the stand-in while engaged.
+
+**Tech Stack:** TypeScript, Phaser 3.90, Vitest (node env), Vite (PNG imports/globs → URLs). Builds on the GD-0006 combat + test-bed already on this branch (PR #19).
+
+## Global Constraints
+
+- **Benchmark-only / non-authoritative.** All art is status `review` (never auto-`approved`). No damage/defeat model (D01 open) — the stand-in "punch" is visual + timer refresh only.
+- **Art facts:** both characters are **68×68px, 8-dir, low top-down**. `run` = 4 frames × 8 dir (complete). `punch` (`cross-punch`, 6 frames) is **partial**: Bruno = `s, se, sw`; Eduardo = `s, se` (other dirs failed on PixelLab; cannot regenerate on the trial). Missing punch dirs fall back to the nearest covered direction. Idle = the 8 rotation frames.
+- **Greybox fallback preserved:** if a texture is absent, render the existing primitive (player rectangle / stand-in coloured Hunter).
+- **Directions:** store frames under short codes `n ne e se s sw w nw` (map PixelLab's `south`/`south-east`/… → short during download).
+- **TDD** for pure/sim changes. Gate: `pnpm validate` green from repo root (lint enforced — keep imports/exports sorted). Do NOT start a dev server / bind 5173.
+- Work stays on branch `agent/combat-push-apart-collision` (PR #19).
+
+---
+
+### Task 1: download & organise the two Hunter assets
+
+**Files (create):**
+- `apps/game-client/src/assets/source/characters/hunter/bruno-dentes/body/{idle,run,punch}/<dir>/<nnn>.png` + `metadata.json`
+- `apps/game-client/src/assets/source/characters/hunter/eduardo-careca/body/{idle,run,punch}/<dir>/<nnn>.png` + `metadata.json`
+
+- [ ] **Step 1: Fetch fresh URLs from PixelLab**
+
+Load the PixelLab MCP tool and fetch both characters (fresh signed URLs):
+- `mcp__pixellab__get_character` for `21054bb1-a532-4704-b014-8bd12e56141e` (Bruno Dentes = player)
+- `mcp__pixellab__get_character` for `6f25ce18-ae44-44ab-b227-caf274032d8c` (Eduardo Careca = stand-in)
+
+- [ ] **Step 2: Download into the source tree**
+
+For each character, download (curl) into the short-code layout, zero-padded 3-digit frame files:
+- **idle:** each of the 8 `rotations/<dir>.png` → `body/idle/<shortdir>/000.png`.
+- **run:** `running-4-frames`, each dir's 4 frames → `body/run/<shortdir>/000.png..003.png`.
+- **punch:** `cross-punch`, each AVAILABLE dir's 6 frames → `body/punch/<shortdir>/000.png..005.png` (Bruno: s/se/sw; Eduardo: s/se — download only what exists).
+
+Map PixelLab dir names → short codes: `south→s, south-east→se, east→e, north-east→ne, north→n, north-west→nw, west→w, south-west→sw`.
+
+- [ ] **Step 3: Write `metadata.json` per character**
+
+Mirror the hound's `body/metadata.json` shape. Set `status: "review"`, `canvas {68,68}`, `pivot {x:34, y:60}` (provisional; calibrated in Task 4), `directions`, an `animations` map (`idle` 1f; `run` 4f, 8 dir; `punch` 6f with the actual covered `directions` list + a note that the rest failed on the trial), and `source` (tool `pixellab`, `promptRef` the art-direction brief from Task 2, `generatedAt` the character's date, note "generated manually by the GD Lead; 68×68 vs the 64×80 Hunter spec — benchmark art"). `approval.state: "review"`.
+
+- [ ] **Step 4: Verify counts**
+
+Confirm on disk: Bruno = 8 idle + 32 run + 18 punch (3 dir); Eduardo = 8 idle + 32 run + 12 punch (2 dir). Report the exact per-direction counts (flag any download gaps).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/game-client/src/assets/source/characters/hunter
+git commit -m "feat(art): add Bruno Dentes (player) + Eduardo Careca (stand-in) Hunter art (PixelLab, review)"
+```
+
+---
+
+### Task 2: art-direction provenance
+
+**Files:** Create `docs/art-direction/briefs/hunter-benchmark.md` (both Hunters).
+
+- [ ] **Step 1:** Write a short brief documenting: the two benchmark Hunters (player = Bruno Dentes, stand-in = Eduardo Careca), their role, that they are **review**-status PixelLab art generated by the GD Lead, 68×68 low top-down 8-dir, run complete, punch partial (list covered dirs + that completion is pending PixelLab credits), and the palette/style-guide reference. Note the 68×68 vs 64×80 spec divergence as accepted for the benchmark.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add docs/art-direction/briefs/hunter-benchmark.md
+git commit -m "docs(art): brief for the benchmark Hunter sprites (Bruno + Eduardo, review)"
+```
+
+---
+
+### Task 3: manifest + pure punch-direction fallback
+
+**Files:**
+- Modify: `apps/game-client/src/gameplay/sprite-directions.ts` (+ its test)
+- Modify: `apps/game-client/src/scenes/benchmark-assets.ts`
+- Modify: `apps/game-client/src/gameplay/index.ts` (export the helper)
+
+**Interfaces produced:**
+- `nearestCoveredDirection(target: Direction8, covered: readonly Direction8[]): Direction8` — the covered direction whose unit vector is most aligned with `target`'s (max dot product); returns `target` if it is itself covered; throws/returns first if `covered` is empty (guard: assume non-empty per caller).
+- Manifest: `PLAYER_IDLE_BASE/RUN_BASE/PUNCH_BASE`, `TEST_*` bases; `PLAYER_ART`/`TEST_ART` = `{canvas:{68,68}, pivotY:60}`; `PLAYER_PUNCH_DIRS`/`TEST_PUNCH_DIRS`; `*_RUN_FRAME_COUNT=4`, `*_PUNCH_FRAME_COUNT=6`; frame-key builders; and the new frames folded into `BENCHMARK_ART_FRAMES`.
+
+- [ ] **Step 1: Write the failing test (pure helper)**
+
+Add to `sprite-directions.test.ts` (import `nearestCoveredDirection`):
+
+```ts
+describe('nearestCoveredDirection', () => {
+  const covered: Direction8[] = ['s', 'se', 'sw'];
+  it('returns the target when it is covered', () => {
+    expect(nearestCoveredDirection('se', covered)).toBe('se');
+  });
+  it('maps an uncovered direction to the nearest covered one', () => {
+    expect(nearestCoveredDirection('e', covered)).toBe('se'); // east → south-east
+    expect(nearestCoveredDirection('w', covered)).toBe('sw'); // west → south-west
+    expect(nearestCoveredDirection('n', ['s', 'se'])).toBe('se'); // north → nearest available
+  });
+});
+```
+
+- [ ] **Step 2: Run → fail** (`pnpm --filter @hunter-order/game-client test -- sprite-directions.test.ts`) — not exported.
+
+- [ ] **Step 3: Implement the helper**
+
+In `sprite-directions.ts` (uses `directionToVector` from `./direction`):
+
+```ts
+import { type Direction8, directionToVector } from './direction';
+
+/**
+ * The covered direction most aligned with `target` (max dot product of unit
+ * vectors) — used to fall back to an available animation direction when a
+ * per-direction frame set is incomplete. Returns `target` if it is covered.
+ * Assumes `covered` is non-empty.
+ */
+export function nearestCoveredDirection(
+  target: Direction8,
+  covered: readonly Direction8[],
+): Direction8 {
+  if (covered.includes(target)) {
+    return target;
+  }
+  const t = directionToVector(target);
+  let best = covered[0];
+  let bestDot = -Infinity;
+  for (const dir of covered) {
+    const v = directionToVector(dir);
+    const dot = t.x * v.x + t.y * v.y;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = dir;
+    }
+  }
+  return best;
+}
+```
+
+Run → pass. Export from `gameplay/index.ts` (`./sprite-directions` block, sorted).
+
+- [ ] **Step 4: Extend the art manifest**
+
+In `benchmark-assets.ts`, mirroring the hound pattern, add for BOTH characters (player = `characters/hunter/bruno-dentes`, test = `characters/hunter/eduardo-careca`):
+- glob the idle (`body/idle/*/000.png`), run (`body/run/*/*.png`) and punch (`body/punch/*/*.png`) frames per character (eager, `?url`), building `ArtFrame`s with keys `directionalFrameKey(BASE, dir)` for idle and `${directionalFrameKey(RUN/PUNCH_BASE, dir)}-${n}` for anim frames (add `playerRunFrameKey`/`playerPunchFrameKey`/`testRunFrameKey`/`testPunchFrameKey` builders, or one parametrised builder).
+- export `PLAYER_ART`/`TEST_ART` (`{canvas:{width:68,height:68}, pivotY:60}`), `PLAYER_PUNCH_DIRS: Direction8[] = ['s','se','sw']`, `TEST_PUNCH_DIRS: Direction8[] = ['s','se']`, and the frame counts.
+- append all the new frames into `BENCHMARK_ART_FRAMES`.
+
+Keep it readable (a small per-character helper is fine); avoid 100 hand imports — use globs like `RUN_MODULES`.
+
+- [ ] **Step 5: Validate + commit**
+
+`pnpm validate` green, then:
+
+```bash
+git add apps/game-client/src/gameplay/sprite-directions.ts apps/game-client/src/gameplay/sprite-directions.test.ts apps/game-client/src/gameplay/index.ts apps/game-client/src/scenes/benchmark-assets.ts
+git commit -m "feat(client): manifest for the two Hunter sprites + nearest-covered-direction punch fallback"
+```
+
+---
+
+### Task 4: render the player Hunter as a directional sprite (idle/run/punch)
+
+**Files:** Modify `apps/game-client/src/scenes/benchmark-scene.ts`.
+
+Generalise the same real-sprite pattern already used for the hound (sprite when art loaded, else the greybox primitive). No unit tests; gate `pnpm validate` + visual.
+
+- [ ] **Step 1:** In `createHunter`, when `PLAYER` idle art is loaded (`this.textures.exists(directionalFrameKey(PLAYER_IDLE_BASE, 's'))`), build the Hunter body as a `Phaser.GameObjects.Sprite` (origin at the feet pivot from `PLAYER_ART`) instead of the rectangle; keep the separate shadow. Drop the facing tick when using the real sprite (the sprite conveys facing). Keep the rectangle + tick as the fallback path.
+- [ ] **Step 2:** Register the player run animations (one per dir, 4 frames, `frameRate ~9`, loop) and punch animations (one per COVERED dir, 6 frames, no loop) in a `registerPlayerAnimations()` (mirror `registerHoundAnimations`).
+- [ ] **Step 3:** In `update`, drive the player sprite: while a punch is playing (a `punchUntil`/anim-complete flag) hold the punch; else if moving play the directional run; else show the idle rotation for the facing. Use `nearestCoveredDirection(facing, PLAYER_PUNCH_DIRS)` to pick the punch direction.
+- [ ] **Step 4:** In `handleAttack`, when the swing fires, start the player punch: play `directionalFrameKey(PLAYER_PUNCH_BASE, nearestCoveredDirection(facing, PLAYER_PUNCH_DIRS))` once and set the punch-playing flag for its duration (or via the Phaser `animationcomplete` event). The existing hit/repel/feel logic is unchanged.
+- [ ] **Step 5:** `pnpm validate` green; commit `feat(client): render the player Hunter sprite with run + punch (greybox fallback)`.
+
+---
+
+### Task 5: stand-in AI — retaliate (chase + punch), config + sim
+
+**Files:**
+- Modify: `apps/game-client/src/core/config/benchmark.ts` (extend `sandbox.otherHunter`)
+- Modify: `apps/game-client/src/gameplay/stand-in-hunter.ts` (+ test)
+- Modify: `apps/game-client/src/gameplay/benchmark-simulation.ts` (+ test)
+
+- [ ] **Step 1 (config):** In `BENCHMARK.sandbox.otherHunter`, add `attackRange: 40`, `attackCooldownSeconds: 0.8`, and rename `fleeSpeedMultiplier` → `combatSpeedMultiplier` (speed while chasing in combat, e.g. `1.0`). Update the config test if it referenced the old name.
+- [ ] **Step 2 (pure AI flip, TDD):** Change `stepStandInHunter`'s `inCombat` branch from fleeing (away from player) to **chasing** (toward player). Update the existing "flees away" test to assert it now moves TOWARD the player when `inCombat` (e.g. player to the west → stand-in moves west / its x decreases). Wander (not in combat) is unchanged.
+- [ ] **Step 3 (sim attack, TDD):** In `BenchmarkSimulation`, add `private standInCooldown = 0` and a per-frame pulse `private standInStruckThisFrame = false` with `get standInStruck(): boolean`. In `update` (after stepping the stand-in): decrement `standInCooldown`; if `pvpEngaged` and `distance(otherHunter, player) <= attackRange` and `standInCooldown <= 0`, set `standInStruckThisFrame = true`, `standInCooldown = attackCooldownSeconds`, and refresh `pvpTimer = pvpCombatSeconds` (the stand-in's attack keeps combat alive); else `standInStruckThisFrame = false`. Write a failing test first: with the stand-in in range while engaged, one `update` sets `standInStruck` true and refreshes the timer; out of range it stays false. `reset` zeroes the cooldown/pulse.
+- [ ] **Step 4:** `pnpm validate` green; commit `feat(client): stand-in Hunter retaliates — chases and punches the player (no damage, GD-0006 stub)`.
+
+---
+
+### Task 6: render the stand-in sprite + PvP combat indicator + player hit-flash
+
+**Files:** Modify `apps/game-client/src/scenes/benchmark-scene.ts` (+ `core/config/benchmark.ts` if a marker colour is needed).
+
+- [ ] **Step 1:** Render the stand-in with Eduardo's real sprite (idle/run/punch) — same pattern as Task 4, using `TEST_*` keys and `TEST_PUNCH_DIRS`; greybox coloured-Hunter fallback preserved. Register the test Hunter's run/punch anims.
+- [ ] **Step 2:** When `sim.standInStruck` pulses true in `update`, play the stand-in's punch anim (`nearestCoveredDirection(standInFacing, TEST_PUNCH_DIRS)`) and flash the PLAYER (a brief flash overlay on the Hunter, reusing the feel-flash idiom).
+- [ ] **Step 3 (combat indicator):** While `sim.pvpEngaged`, draw a combat marker over the stand-in — a small ring/chevron above its head + a `EM COMBATE` label (screen-space or world-space above the sprite), hidden when not engaged. Use a restrained accent colour (add `colors.combatMarker` if needed).
+- [ ] **Step 4:** `pnpm validate` green; commit `feat(client): render stand-in sprite + PvP combat marker/label + player hit-flash`.
+
+---
+
+### Task 7: verify, report, update PR #19
+
+- [ ] **Step 1:** `pnpm validate` green.
+- [ ] **Step 2:** Nightly report `docs/agent/reports/2026-07-30-hunter-art-retaliating-standin.md`: outcome (real player + stand-in Hunter art; Space punches; stand-in retaliates; PvP combat indicator), status, changes, decisions applied (punch nearest-covered fallback; retaliate stub, no damage; art at review), how to verify, deferred (complete the punch directions when PixelLab has credits; palette/Aseprite pass; 68×68 vs 64×80 spec), risks.
+- [ ] **Step 3:** Commit the report; `git push` (PR #19). Update the PR #19 body to note the Hunter-art + retaliating-stand-in additions. Do NOT merge.
+
+---
+
+## Self-Review
+
+**Coverage:** assets downloaded + metadata (T1); provenance brief (T2); manifest + pure punch fallback (T3); player sprite idle/run/punch + Space punch (T4); stand-in flee→chase + attack stub + config (T5); stand-in sprite + PvP marker/label + player hit-flash (T6); report/PR (T7). ✓
+
+**Placeholder note:** render tasks (4, 6) are structural instructions that generalise the existing hound-sprite pattern already in the scene (sprite-or-fallback, register anims, play run/idle) — not placeholders; the correctness-critical code (pure helper, sim AI/attack, config) is fully specified.
+
+**Type/name consistency:** `nearestCoveredDirection` (sprite-directions), `PLAYER_*`/`TEST_*` manifest keys + `PUNCH_DIRS`, `standInStruck`/`pvpEngaged` getters, `sandbox.otherHunter.{attackRange,attackCooldownSeconds,combatSpeedMultiplier}` are used consistently across tasks. Punch art coverage (Bruno s/se/sw; Eduardo s/se) is fixed in T1 metadata and T3 `*_PUNCH_DIRS`. ✓
+
+**GD-0006 / scope fidelity:** the stand-in attack is a labelled benchmark stub (visual punch + timer refresh, no damage; D01 open); art is `review`; player authority and combat-gating from the prior tasks are untouched. ✓
