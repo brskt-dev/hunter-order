@@ -85,7 +85,10 @@ export function registerHoundHit(state: HoundState, config: RuinHoundConfig): Ho
 /**
  * True when the hound is within `range` and inside the Hunter's facing arc
  * (`arcCos` is the cosine of the half-arc; e.g. 0.5 ≈ a 120° cone). `facingVec`
- * must be unit-length. A hound on top of the Hunter always connects.
+ * must be unit-length. A hound on top of the Hunter always connects. Within
+ * `pointBlankRange` (default 0, i.e. disabled) the hound connects regardless of
+ * facing — a soft tolerance for the case where the Hunter and hound are pressed
+ * together during combat (GD-0006).
  */
 export function houndInAttackReach(
   state: HoundState,
@@ -93,17 +96,39 @@ export function houndInAttackReach(
   facingVec: Vec2,
   range: number,
   arcCos: number,
+  pointBlankRange = 0,
 ): boolean {
   const to = { x: state.position.x - hunterPos.x, y: state.position.y - hunterPos.y };
   const dist = length(to);
   if (dist > range) {
     return false;
   }
-  if (dist < 1e-6) {
+  if (dist <= pointBlankRange || dist < 1e-6) {
     return true;
   }
   const dir = normalize(to);
   return dir.x * facingVec.x + dir.y * facingVec.y >= arcCos;
+}
+
+/**
+ * Circumstantial combat collision (GD-0006): resolve a hound overlapping the Hunter
+ * to a soft, non-stacking standoff. Returns the hound position pushed OUT to
+ * `minDistance` from the Hunter along the current separation direction; a hound
+ * already at/beyond `minDistance` is returned unchanged (only pushes out, never in).
+ * Pure. The caller decides when this applies (only while in combat) and re-resolves
+ * the result against world solids.
+ */
+export function combatSeparation(houndPos: Vec2, hunterPos: Vec2, minDistance: number): Vec2 {
+  const away = { x: houndPos.x - hunterPos.x, y: houndPos.y - hunterPos.y };
+  const d = length(away);
+  if (d >= minDistance) {
+    return houndPos;
+  }
+  if (d < 1e-6) {
+    return { x: hunterPos.x + minDistance, y: hunterPos.y };
+  }
+  const scale = minDistance / d;
+  return { x: hunterPos.x + away.x * scale, y: hunterPos.y + away.y * scale };
 }
 
 /**

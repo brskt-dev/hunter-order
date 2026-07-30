@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  combatSeparation,
   createHoundState,
   houndInAttackReach,
   houndInContact,
@@ -215,5 +216,35 @@ describe('houndInAttackReach', () => {
   it('misses a hound out of range', () => {
     const s: HoundState = { ...createHoundState(CONFIG), position: vec2(300, 200) }; // dist 100 > 52
     expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
+  });
+
+  it('connects at point-blank regardless of facing', () => {
+    // 10px WEST of (behind) the hunter, who faces east.
+    const s: HoundState = { ...createHoundState(CONFIG), position: vec2(190, 200) };
+    // Behind the Hunter and outside the facing arc: misses without point-blank.
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
+    // Within a 30px point-blank range, it connects regardless of facing.
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5, 30)).toBe(true);
+  });
+});
+
+describe('combatSeparation', () => {
+  const hunter = vec2(100, 100);
+
+  it('leaves a hound that is already clear untouched', () => {
+    const pos = vec2(100, 160); // 60 away
+    expect(combatSeparation(pos, hunter, 36)).toBe(pos);
+  });
+
+  it('pushes an overlapping hound out to exactly minDistance along the away direction', () => {
+    const pos = vec2(110, 100); // 10 away, east
+    const out = combatSeparation(pos, hunter, 36);
+    expect(out.x).toBeCloseTo(136, 5);
+    expect(out.y).toBeCloseTo(100, 5);
+  });
+
+  it('resolves a hound coincident with the Hunter to a deterministic standoff', () => {
+    const out = combatSeparation(vec2(100, 100), hunter, 36);
+    expect(Math.hypot(out.x - hunter.x, out.y - hunter.y)).toBeCloseTo(36, 5);
   });
 });
