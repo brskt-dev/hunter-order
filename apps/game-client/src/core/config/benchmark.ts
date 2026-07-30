@@ -154,6 +154,27 @@ export const BENCHMARK = {
     intensitySmoothing: 4,
   },
 
+  /**
+   * Oblique (2.5D, Tibia-like) presentation — PRESENTATION ONLY. Walls draw a
+   * top face plus a front face `wallHeight` px tall on south-exposed edges, drawn
+   * upward *within* the wall's own tile (never into the tile in front, so the
+   * Hunter never appears to float on it); a subtle 2-tone grass + a dirt path
+   * make the floor read as tiled.
+   * Collision/logic stay orthogonal on the tile AABBs (GD-0004). Placeholder
+   * colours until real tiles arrive (PixelLab, paid plan).
+   */
+  oblique: {
+    wallHeight: 30,
+    dirtTiles: [
+      { col: 5, row: 5 },
+      { col: 6, row: 6 },
+      { col: 7, row: 7 },
+      { col: 8, row: 8 },
+      { col: 9, row: 9 },
+      { col: 10, row: 10 },
+    ],
+  },
+
   /** Greybox placeholder palette (numeric for Phaser primitives). */
   colors: {
     ground: 0x2f3a2c,
@@ -179,6 +200,13 @@ export const BENCHMARK = {
     // Axe swing arc + the flash when a hit lands on the hound.
     attack: 0xf0ead6,
     hitFlash: 0xffe8a3,
+    // Oblique walls: lit top face + shaded front face + dark top edge.
+    wallTop: 0x8a8690,
+    wallFront: 0x4c4a52,
+    wallEdge: 0x2b2930,
+    // Tiled-floor placeholder: a second grass tone (checker) + a dirt path.
+    groundAlt: 0x35422f,
+    dirt: 0x4a3f30,
     prompt: 0xf4f4ec,
   },
 } as const;

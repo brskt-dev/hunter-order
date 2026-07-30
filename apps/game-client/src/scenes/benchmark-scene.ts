@@ -29,6 +29,7 @@ import {
   HOUND_RUN_FRAME_COUNT,
   houndRunFrameKey,
 } from './benchmark-assets';
+import { obliqueWallTiles } from './oblique-walls';
 
 /**
  * First-playable-loop greybox — the "Overgrown Ruin" benchmark scene.
@@ -233,6 +234,10 @@ export class BenchmarkScene extends BaseScene {
     this.hunter.setPosition(position.x, position.y);
     this.hunter.setDepth(DEPTH.entity + position.y); // pivot.y sorting
     this.shadow.setPosition(position.x, position.y);
+    // Sort the shadow with its owner (just under the body) so it stays grounded
+    // in front of walls the Hunter is standing before — not hidden behind their
+    // oblique front faces (which live in the entity depth band).
+    this.shadow.setDepth(DEPTH.entity + position.y - 1);
 
     const tick = directionToVector(facing);
     this.facingTick.setPosition(
@@ -254,6 +259,7 @@ export class BenchmarkScene extends BaseScene {
     this.hound.setPosition(state.position.x, state.position.y);
     this.hound.setDepth(DEPTH.entity + state.position.y); // pivot.y sorting
     this.houndShadow.setPosition(state.position.x, state.position.y);
+    this.houndShadow.setDepth(DEPTH.entity + state.position.y - 1); // grounded vs walls (Y-sort)
 
     if (this.houndSprite) {
       // Moving -> play the directional run loop; at rest -> the static idle pose.
@@ -323,22 +329,30 @@ export class BenchmarkScene extends BaseScene {
   }
 
   private drawWorld(): void {
-    const { colors, tileSize } = BENCHMARK;
+    const { colors, tileSize, oblique } = BENCHMARK;
     const worldWidth = this.world.bounds.width;
     const worldHeight = this.world.bounds.height;
 
+    // Base grass fill.
     this.add
       .rectangle(0, 0, worldWidth, worldHeight, colors.ground)
       .setOrigin(0, 0)
       .setDepth(DEPTH.ground);
 
-    const grid = this.add.graphics().setDepth(DEPTH.groundDecal);
-    grid.lineStyle(1, colors.gridLine, 0.5);
-    for (let col = 0; col <= this.world.cols; col += 1) {
-      grid.lineBetween(col * tileSize, 0, col * tileSize, worldHeight);
+    // Tiled-floor read: a subtle 2-tone grass checker + a dirt path. Placeholder
+    // until real ground tiles arrive (PixelLab, paid). One Graphics, many fills.
+    const floor = this.add.graphics().setDepth(DEPTH.groundDecal);
+    floor.fillStyle(colors.groundAlt, 0.5);
+    for (let row = 0; row < this.world.rows; row += 1) {
+      for (let col = 0; col < this.world.cols; col += 1) {
+        if ((col + row) % 2 === 0) {
+          floor.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
+        }
+      }
     }
-    for (let row = 0; row <= this.world.rows; row += 1) {
-      grid.lineBetween(0, row * tileSize, worldWidth, row * tileSize);
+    floor.fillStyle(colors.dirt, 0.9);
+    for (const tile of oblique.dirtTiles) {
+      floor.fillRect(tile.col * tileSize, tile.row * tileSize, tileSize, tileSize);
     }
 
     // Subtle marker for the safe starting pocket.
@@ -346,12 +360,52 @@ export class BenchmarkScene extends BaseScene {
       .circle(this.world.spawn.x, this.world.spawn.y, tileSize * 0.4, colors.spawn, 0.25)
       .setDepth(DEPTH.groundDecal);
 
-    for (const solid of this.world.solids) {
+    this.drawObliqueWalls();
+  }
+
+  /**
+   * 2.5D walls (presentation only; collision stays the logical AABB — GD-0004).
+   * Every solid tile gets a flat top face; tiles with an empty south neighbour
+   * also get a raised front face, depth-sorted in the entity band by its base
+   * edge so the Hunter/hound pass in front of walls below them and behind walls
+   * above them. Per-tile fronts keep occlusion correct on tall walls.
+   */
+  private drawObliqueWalls(): void {
+    const { colors, tileSize, oblique } = BENCHMARK;
+    const height = oblique.wallHeight;
+    const { tops, fronts } = obliqueWallTiles(BENCHMARK.solidTiles);
+    const exposed = new Set(fronts.map((c) => `${c.col},${c.row}`));
+
+    // Walls live in the entity depth band, sorted by each tile's south (ground)
+    // edge: entities in front (south) draw over them; entities behind (north) are
+    // occluded. The height is drawn UPWARD *within* the tile (a top strip + a
+    // front strip) — it never intrudes into the walkable tile in front, so a
+    // Hunter standing against a wall stays cleanly on the ground. Presentation
+    // only; collision is the logical tile AABB (GD-0004).
+    for (const cell of tops) {
+      const x = cell.col * tileSize;
+      const y = cell.row * tileSize;
+      const depth = DEPTH.entity + (y + tileSize); // south/ground edge of the tile
+      if (!exposed.has(`${cell.col},${cell.row}`)) {
+        this.add
+          .rectangle(x, y, tileSize, tileSize, colors.wallTop)
+          .setOrigin(0, 0)
+          .setDepth(depth);
+        continue;
+      }
+      const faceY = y + tileSize - height;
       this.add
-        .rectangle(solid.x, solid.y, solid.width, solid.height, colors.solid)
+        .rectangle(x, y, tileSize, tileSize - height, colors.wallTop)
         .setOrigin(0, 0)
-        .setStrokeStyle(2, colors.solidStroke)
-        .setDepth(DEPTH.lowObject);
+        .setDepth(depth);
+      this.add
+        .rectangle(x, faceY, tileSize, height, colors.wallFront)
+        .setOrigin(0, 0)
+        .setDepth(depth + 0.1);
+      this.add
+        .rectangle(x, faceY, tileSize, 2, colors.wallEdge)
+        .setOrigin(0, 0)
+        .setDepth(depth + 0.2);
     }
   }
 
