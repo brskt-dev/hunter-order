@@ -110,7 +110,7 @@ describe('benchmark config', () => {
     }
     // Restrained: a hit-stop micro-hold, a few px of shake, a small pop.
     expect(f.hitStopSeconds).toBeLessThanOrEqual(0.12);
-    expect(f.shakePeakPx).toBeLessThanOrEqual(6);
+    expect(f.shakePeakPx).toBeLessThanOrEqual(10);
     expect(f.pickupPopScale).toBeGreaterThan(1);
     expect(f.pickupPopScale).toBeLessThanOrEqual(1.4);
   });

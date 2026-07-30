@@ -160,7 +160,7 @@ export const BENCHMARK = {
     /** Engagement smoothing rate (per second); drives zoom + look-ahead + danger. */
     intensitySmoothing: 4,
     /** Engage eases in at `intensitySmoothing`; disengage eases out gentler. */
-    exitSmoothing: 2.5,
+    exitSmoothing: 1.6,
   },
 
   /**
@@ -171,23 +171,23 @@ export const BENCHMARK = {
    */
   feel: {
     /** Visual micro-hold on the hound at impact (seconds). */
-    hitStopSeconds: 0.05,
+    hitStopSeconds: 0.09,
     /** Max camera render offset at full shake (world px). Small on purpose. */
-    shakePeakPx: 3,
+    shakePeakPx: 8,
     /** Exponential decay rate of the shake envelope (per second). */
-    shakeDecayRate: 9,
+    shakeDecayRate: 7,
     /** Oscillation frequency of the shake offset (rad/s-ish). */
-    shakeFrequency: 60,
+    shakeFrequency: 55,
     /** Exponential decay rate of the impact-flash envelope (per second). */
-    flashDecayRate: 8,
+    flashDecayRate: 6,
     /** Max hound VISUAL recoil offset (world px) — never the logical position. */
-    recoilPeakPx: 6,
+    recoilPeakPx: 16,
     /** Exponential decay rate of the recoil envelope (per second). */
-    recoilDecayRate: 12,
+    recoilDecayRate: 9,
     /** Fragment pickup pop peak scale. */
-    pickupPopScale: 1.15,
+    pickupPopScale: 1.3,
     /** Fragment pickup pop + fade duration (ms). */
-    pickupPopMs: 180,
+    pickupPopMs: 240,
   },
 
   /**
