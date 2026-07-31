@@ -121,8 +121,6 @@ export const BENCHMARK = {
     deAggroRadius: 340,
     contactRadius: 40,
     arriveEpsilon: 6,
-    /** Axe hits to drive it off (benchmark stub — no health/damage model). */
-    hitsToRepel: 2,
     /** Runs away faster than it chased. */
     fleeSpeedMultiplier: 1.4,
   },
@@ -144,6 +142,36 @@ export const BENCHMARK = {
      * range the facing arc still gates the hit.
      */
     pointBlankRange: 30,
+  },
+
+  /**
+   * Benchmark combat model (GD-0007 — BENCHMARK-ONLY, non-authoritative). HP,
+   * fixed per-hit damage, and brief "downed" durations. Provisional tuning, NOT
+   * approved balance; the server-authoritative model is future work.
+   */
+  combatModel: {
+    /** Player Hunter max HP. */
+    hunterMaxHp: 5,
+    /** Damage the player's axe/punch deals per connecting hit. */
+    playerAttackDamage: 1,
+    hound: {
+      /** Hound HP (was the `hitsToRepel` repel stub). */
+      maxHp: 2,
+      /** Damage a hound deals to the player per contact bite. */
+      contactDamage: 1,
+      /** Seconds between a hound's contact bites. */
+      contactCooldownSeconds: 1.2,
+      /** Seconds a hound stays "downed" (frozen) before it flees/vanishes. */
+      downedSeconds: 0.6,
+    },
+    standIn: {
+      /** Stand-in Hunter HP. */
+      maxHp: 3,
+      /** Damage the stand-in's punch deals to the player. */
+      punchDamage: 1,
+      /** Seconds the stand-in stays "downed" before it recedes/resets. */
+      downedSeconds: 0.6,
+    },
   },
 
   /**

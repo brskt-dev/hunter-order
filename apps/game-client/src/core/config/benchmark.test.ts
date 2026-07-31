@@ -87,11 +87,24 @@ describe('benchmark config', () => {
   });
 
   it('has sane hand-axe / repel tunables', () => {
-    expect(BENCHMARK.hound.hitsToRepel).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackRange).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackCooldownSeconds).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackArcCos).toBeGreaterThanOrEqual(-1);
     expect(BENCHMARK.combat.attackArcCos).toBeLessThanOrEqual(1);
+  });
+
+  it('has a benchmark combat model with positive HP and damage', () => {
+    const c = BENCHMARK.combatModel;
+    for (const v of [
+      c.hunterMaxHp, c.playerAttackDamage,
+      c.hound.maxHp, c.hound.contactDamage, c.hound.contactCooldownSeconds, c.hound.downedSeconds,
+      c.standIn.maxHp, c.standIn.punchDamage, c.standIn.downedSeconds,
+    ]) {
+      expect(v).toBeGreaterThan(0);
+    }
+    // A few axe hits should down a hound / the stand-in (benchmark pacing).
+    expect(c.hound.maxHp).toBeLessThanOrEqual(c.playerAttackDamage * 5);
+    expect(c.standIn.maxHp).toBeLessThanOrEqual(c.playerAttackDamage * 6);
   });
 
   it('has restrained, positive feel tunables', () => {
