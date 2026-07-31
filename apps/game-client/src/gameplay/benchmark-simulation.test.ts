@@ -10,7 +10,7 @@ import {
 import { type Interactable } from './interaction';
 import { type MovementAction } from './movement-intent';
 import { type RuinHoundConfig } from './ruin-hound';
-import { length, vec2 } from './vec2';
+import { length, type Vec2, vec2 } from './vec2';
 import { createTileWorld, tileCentre, type TileWorld } from './world';
 
 const CONFIG: HunterSimConfig = {
@@ -708,5 +708,144 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(sim.standInStruck).toBe(true);
     sim.reset();
     expect(sim.standInStruck).toBe(false);
+  });
+});
+
+describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () => {
+  // A hound already touching the Hunter at spawn — immediately aggros (huge
+  // aggroRadius) and combat separation (GD-0006) holds it at exactly
+  // footprintRadius(20) + CONFIG.footprintRadius(16) = 36, inside contactRadius
+  // (40), so contact is established from the very first `update` regardless of
+  // its own speed.
+  const contactHoundConfig = (spawn: Vec2): RuinHoundConfig => ({
+    speed: 0,
+    footprintRadius: 20,
+    waypoints: [spawn, spawn],
+    aggroRadius: 1000,
+    deAggroRadius: 2000,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+    fleeSpeedMultiplier: 1.4,
+  });
+
+  const withContactHound = (): BenchmarkSimulation => {
+    const world = openWorld();
+    return new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [contactHoundConfig(world.spawn)]);
+  };
+
+  it('exposes the player max HP', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
+    expect(sim.playerMaxHp).toBe(COMBAT_MODEL.hunterMaxHp);
+  });
+
+  it('has no struck/defeated pulse before anything has happened', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
+    expect(sim.playerStruck).toBe(false);
+    expect(sim.playerDefeatedThisFrame).toBe(false);
+    expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp);
+  });
+
+  it('a hound in contact damages the player on its cooldown, not every frame', () => {
+    const sim = withContactHound();
+    const before = sim.playerHp;
+
+    sim.update(noActions, 0.05); // first contact bite
+    expect(sim.inDanger).toBe(true); // sanity: contact is actually established
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
+    expect(sim.playerStruck).toBe(true);
+
+    sim.update(noActions, 0.05); // still well within contactCooldownSeconds (1.2)
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage); // no 2nd bite
+    expect(sim.playerStruck).toBe(false);
+
+    sim.update(noActions, COMBAT_MODEL.hound.contactCooldownSeconds); // cooldown elapses
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage * 2);
+    expect(sim.playerStruck).toBe(true);
+  });
+
+  it("the stand-in's punch damages the player too", () => {
+    const standInConfig: StandInSimConfig = {
+      speed: 120,
+      footprintRadius: 16,
+      wanderTurnRate: 0.8,
+      combatSpeedMultiplier: 1.0,
+      attackRange: 40,
+      attackCooldownSeconds: 0.8,
+    };
+    const sim = new BenchmarkSimulation(
+      openWorld(),
+      CONFIG,
+      COMBAT_MODEL,
+      [],
+      [],
+      standInConfig,
+      vec2(264, 290), // within the stand-in's own attackRange before it even steps
+      3,
+    );
+    const before = sim.playerHp;
+    sim.tryAttack(); // engages pvp
+    sim.update(noActions, 1 / 60); // stand-in punches back this frame
+    expect(sim.standInStruck).toBe(true);
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.standIn.punchDamage);
+    expect(sim.playerStruck).toBe(true);
+  });
+
+  it('respawns the player at spawn with restored HP on defeat, keeping collected progress', () => {
+    const world = openWorld();
+    // Within interactRange (40) of spawn (264, 264) from the very first frame —
+    // no movement needed before collecting it.
+    const nearFragment: Interactable = {
+      id: 'frag-near',
+      kind: 'fragment',
+      bounds: { x: 270, y: 250, width: 20, height: 20 },
+      blocksWhileActive: false,
+      collectible: true,
+      state: 'active',
+    };
+    const sim = new BenchmarkSimulation(
+      world,
+      CONFIG,
+      COMBAT_MODEL,
+      [nearFragment],
+      [contactHoundConfig(world.spawn)],
+    );
+
+    expect(sim.tryInteract()?.id).toBe('frag-near');
+    expect(sim.collected).toEqual([{ id: 'frag-near', kind: 'fragment' }]);
+
+    // Each update's dt exceeds the contact cooldown, so every call lands a bite;
+    // hunterMaxHp (5) hits are enough to drive HP to 0 and trigger a respawn.
+    for (let i = 0; i < COMBAT_MODEL.hunterMaxHp; i += 1) {
+      sim.update(noActions, COMBAT_MODEL.hound.contactCooldownSeconds + 0.01);
+    }
+
+    expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp); // restored
+    expect(sim.playerDefeatedThisFrame).toBe(true); // the respawn frame
+    expect(sim.hunter.position).toEqual(world.spawn); // back at spawn
+    expect(sim.houndHp[0]).toBe(COMBAT_MODEL.hound.maxHp); // combat entities reset
+    expect(sim.houndDowned[0]).toBe(false);
+    // Progress is KEPT — not re-seeded to 'active' like a full `reset()` would.
+    expect(sim.collected).toEqual([{ id: 'frag-near', kind: 'fragment' }]);
+    expect(sim.interactables.find((it) => it.id === 'frag-near')?.state).toBe('cleared');
+
+    // The pulse doesn't linger past the respawn frame.
+    sim.update(noActions, 1 / 60);
+    expect(sim.playerDefeatedThisFrame).toBe(false);
+  });
+
+  it('reset reinitialises the hound attack cooldown and the struck pulse', () => {
+    const sim = withContactHound();
+    sim.update(noActions, 0.05); // lands a bite, starts the hound's cooldown
+    expect(sim.playerStruck).toBe(true);
+    sim.reset();
+    expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp);
+    expect(sim.playerStruck).toBe(false);
+
+    // A fresh cooldown (not still counting down from the pre-reset bite) — the
+    // very next contact frame bites immediately.
+    const before = sim.playerHp;
+    sim.update(noActions, 0.05);
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
+    expect(sim.playerStruck).toBe(true);
   });
 });

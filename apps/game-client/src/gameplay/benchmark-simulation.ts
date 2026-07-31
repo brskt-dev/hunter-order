@@ -109,9 +109,9 @@ export interface CombatModelConfig {
   readonly hound: {
     /** Hound max HP (was the `hitsToRepel` repel stub). */
     readonly maxHp: number;
-    /** Damage a hound deals to the player per contact bite (Task 4 — unused here). */
+    /** Damage a hound deals to the player per contact bite. */
     readonly contactDamage: number;
-    /** Seconds between a hound's contact bites (Task 4 — unused here). */
+    /** Seconds between a hound's contact bites. */
     readonly contactCooldownSeconds: number;
     /** Seconds a hound stays "downed" (frozen) after reaching 0 HP, before it flees. */
     readonly downedSeconds: number;
@@ -119,7 +119,7 @@ export interface CombatModelConfig {
   readonly standIn: {
     /** Stand-in Hunter max HP. */
     readonly maxHp: number;
-    /** Damage the stand-in's punch deals to the player (Task 4 — unused here). */
+    /** Damage the stand-in's punch deals to the player. */
     readonly punchDamage: number;
     /** Seconds the stand-in stays "downed" after reaching 0 HP, before it respawns. */
     readonly downedSeconds: number;
@@ -234,6 +234,18 @@ export class BenchmarkSimulation {
   private standInHpValue: number;
   /** Seconds remaining the stand-in stays "downed" after reaching 0 HP; 0 means not downed. */
   private standInDownedTimerValue = 0;
+  /**
+   * Seconds remaining until each hound can next bite the player, index-stable
+   * with `houndStates` (Task 4 / GD-0007). 0 (or below) means it may bite this
+   * frame if in contact.
+   */
+  private houndAttackCooldownValues: number[];
+  /** True for exactly the frame the player took ANY damage (hound bite or stand-in
+   * punch) — a pulse, not a state, for the scene's hit-flash (Task 4 / GD-0007). */
+  private playerStruckThisFrame = false;
+  /** True for exactly the frame a defeat-triggered respawn happened (Task 4 /
+   * GD-0007) — a pulse the scene uses for a brief cue. */
+  private playerDefeatedThisFramePulse = false;
 
   constructor(
     private readonly world: TileWorld,
@@ -259,6 +271,7 @@ export class BenchmarkSimulation {
     this.houndDownedTimers = this.houndConfigs.map(() => 0);
     this.standInHpValue = combatModel.standIn.maxHp;
     this.standInDownedTimerValue = 0;
+    this.houndAttackCooldownValues = this.houndConfigs.map(() => 0);
     this.recomputeTarget();
   }
 
@@ -320,9 +333,33 @@ export class BenchmarkSimulation {
     return this.standInStruckThisFrame;
   }
 
-  /** The player Hunter's current HP (GD-0007). Never reduced by this task (Task 4). */
+  /** The player Hunter's current HP (GD-0007), clamped at 0 so it never reads negative. */
   get playerHp(): number {
-    return this.hunterHp;
+    return Math.max(0, this.hunterHp);
+  }
+
+  /** The player Hunter's max HP (GD-0007) — mirrors `combatModel.hunterMaxHp`. */
+  get playerMaxHp(): number {
+    return this.combatModel.hunterMaxHp;
+  }
+
+  /**
+   * True for exactly the frame the player took damage (a hound's contact bite
+   * or the stand-in's punch) — a pulse, not a state, for the scene's hit-flash
+   * (Task 4 / GD-0007). Resets to false at the start of every `update` unless
+   * that frame lands a hit again.
+   */
+  get playerStruck(): boolean {
+    return this.playerStruckThisFrame;
+  }
+
+  /**
+   * True for exactly the frame a defeat-triggered respawn happened (the
+   * player's HP reached 0) — a pulse the scene uses for a brief cue (Task 4 /
+   * GD-0007).
+   */
+  get playerDefeatedThisFrame(): boolean {
+    return this.playerDefeatedThisFramePulse;
   }
 
   /** Each hound's current HP, index-stable with `hounds` (GD-0007). */
@@ -450,6 +487,27 @@ export class BenchmarkSimulation {
     }
     this.houndStates = hounds;
 
+    // Task 4 / GD-0007: both player-facing damage pulses reset every frame and
+    // are re-armed below only if a hit actually lands this frame.
+    this.playerStruckThisFrame = false;
+    this.playerDefeatedThisFramePulse = false;
+
+    // Task 4 / GD-0007: a hound that is NOT downed and in contact with the
+    // player bites on its own per-hound cooldown (never every frame). A downed
+    // hound is frozen (see the step loop above) and cannot bite.
+    this.houndAttackCooldownValues = this.houndAttackCooldownValues.map((cooldown, i) => {
+      if (this.houndDownedTimers[i] > 0) {
+        return cooldown;
+      }
+      const nextCooldown = cooldown - dtSeconds;
+      if (nextCooldown <= 0 && houndInContact(this.houndStates[i], this.state.position, this.houndConfigs[i])) {
+        this.hunterHp -= this.combatModel.hound.contactDamage;
+        this.playerStruckThisFrame = true;
+        return this.combatModel.hound.contactCooldownSeconds;
+      }
+      return nextCooldown;
+    });
+
     // GD-0007: a downed stand-in (0 HP) is frozen — skip its movement/attack
     // entirely and count down to a respawn instead. When the timer runs out this
     // frame, it reappears at its original spawn at full HP and the mutual-combat
@@ -496,12 +554,12 @@ export class BenchmarkSimulation {
         this.otherHunterState = otherHunter;
       }
 
-      // Stand-in's punch (GD-0006 stub — no damage model on the player yet, see
-      // Task 4; a visual/timer effect only, rendered by the scene). Off cooldown,
-      // while pvp is engaged and the stand-in is within its own attackRange of
-      // the player, it lands a punch: a one-frame pulse (`standInStruck`) plus a
-      // refresh of the mutual-combat timer, so the stand-in's own attacks keep
-      // the fight alive. The player (`this.state`) is never moved by this.
+      // Stand-in's punch (GD-0006 stub for ITS OWN visual/timer effect; Task 4 /
+      // GD-0007 adds real damage to the player). Off cooldown, while pvp is
+      // engaged and the stand-in is within its own attackRange of the player,
+      // it lands a punch: a one-frame pulse (`standInStruck`) plus a refresh of
+      // the mutual-combat timer, so the stand-in's own attacks keep the fight
+      // alive. The player's POSITION is never moved by this (only its HP).
       this.standInCooldown = Math.max(0, this.standInCooldown - dtSeconds);
       if (this.otherHunterState && this.standInConfig && this.pvpEngaged && this.standInCooldown <= 0) {
         const distance = length({
@@ -512,6 +570,8 @@ export class BenchmarkSimulation {
           this.standInStruckThisFrame = true;
           this.standInCooldown = this.standInConfig.attackCooldownSeconds;
           this.pvpTimer = this.pvpCombatSeconds;
+          this.hunterHp -= this.combatModel.standIn.punchDamage;
+          this.playerStruckThisFrame = true;
         } else {
           this.standInStruckThisFrame = false;
         }
@@ -521,6 +581,15 @@ export class BenchmarkSimulation {
     }
 
     this.pvpTimer = Math.max(0, this.pvpTimer - dtSeconds);
+
+    // Task 4 / GD-0007: once all of this frame's damage (hound bites, the
+    // stand-in's punch) has been applied, a defeated player (0 HP) respawns at
+    // the safe pocket immediately — no permadeath (GD-0007). Collected/cleared
+    // progress is explicitly NOT reset here (see `resetCombatEntities`).
+    if (this.hunterHp <= 0) {
+      this.respawnAfterDefeat();
+      this.playerDefeatedThisFramePulse = true;
+    }
 
     this.attackCooldown = Math.max(0, this.attackCooldown - dtSeconds);
     this.recomputeTarget();
@@ -641,9 +710,37 @@ export class BenchmarkSimulation {
     return { swung: true, hit: false, repelled: false, hitIndex: null, hitOtherHunter: false };
   }
 
+  /** Full reset for a fresh encounter attempt: entities AND world/possession
+   * progress (interactables re-seeded to active, possession log emptied). */
   reset(): void {
     this.interactableList = this.seed.map((it) => ({ ...it }));
     this.collectedList = [];
+    this.resetCombatEntities();
+    // Task 4 / GD-0007: unlike `respawnAfterDefeat` (where the killing hit's
+    // own pulse should still read true for this frame), a full manual reset
+    // clears both pulses — there is no "this frame" hit/defeat to report.
+    this.playerStruckThisFrame = false;
+    this.playerDefeatedThisFramePulse = false;
+  }
+
+  /**
+   * Defeat-triggered respawn (Task 4 / GD-0007 — no permadeath): the player is
+   * returned to the spawn pocket at full HP and every combat entity/timer is
+   * reset to a fresh-encounter state, exactly like `reset()` — EXCEPT world
+   * progress (`interactableList`/`collectedList`) is deliberately left alone,
+   * so anything already cleared or collected stays that way.
+   */
+  private respawnAfterDefeat(): void {
+    this.resetCombatEntities();
+  }
+
+  /**
+   * Shared by `reset()` and `respawnAfterDefeat()`: returns the player to
+   * spawn and every hound/stand-in/combat timer to a fresh-encounter state.
+   * Deliberately does NOT touch `interactableList`/`collectedList` — callers
+   * that want those reset too (`reset()`) do it themselves first.
+   */
+  private resetCombatEntities(): void {
     this.state = BenchmarkSimulation.spawnState(this.world);
     this.houndStates = this.houndConfigs.map((c) => createHoundState(c));
     this.otherHunterState = BenchmarkSimulation.spawnStandIn(this.standInConfig, this.standInSpawn);
@@ -655,6 +752,7 @@ export class BenchmarkSimulation {
     this.hunterHp = this.combatModel.hunterMaxHp;
     this.houndHpValues = this.houndConfigs.map(() => this.combatModel.hound.maxHp);
     this.houndDownedTimers = this.houndConfigs.map(() => 0);
+    this.houndAttackCooldownValues = this.houndConfigs.map(() => 0);
     this.standInHpValue = this.combatModel.standIn.maxHp;
     this.standInDownedTimerValue = 0;
     this.recomputeTarget();
