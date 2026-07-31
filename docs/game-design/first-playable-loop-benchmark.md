@@ -321,6 +321,12 @@ hitbox model, inventory, item identification, persistence rules and multiplayer
 architecture; exact camera constants; final UI art; final biome palette hex values;
 final atlas-generation tooling; and final procedural-generation rules.
 
+> **Benchmark combat:** a concrete, **benchmark-only / non-authoritative** combat &
+> PvP-state model (HP, damage, defeat, respawn) is defined in
+> [GD-0007](../decisions/GD-0007-benchmark-combat-model.md), resolving `D01` at the
+> benchmark level only. The canonical server-authoritative model, balancing, and the
+> death/consequence model remain future work (they need the realtime-transport ADR).
+
 ## Notes for future implementation
 
 Create the greybox first; keep systems small and replaceable; avoid premature final
