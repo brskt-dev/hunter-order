@@ -39,12 +39,12 @@ export { intentFromActions } from './movement-intent';
 export {
   combatSeparation,
   createHoundState,
+  defeatHound,
   houndInAttackReach,
   houndInContact,
   type HoundMode,
   type HoundState,
   nearestOf,
-  registerHoundHit,
   type RuinHoundConfig,
   separatePairSymmetric,
   stepHound,

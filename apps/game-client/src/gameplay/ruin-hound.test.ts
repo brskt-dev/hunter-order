@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   combatSeparation,
   createHoundState,
+  defeatHound,
   houndInAttackReach,
   houndInContact,
   type HoundState,
   nearestOf,
-  registerHoundHit,
   type RuinHoundConfig,
   separatePairSymmetric,
   stepHound,
@@ -24,7 +24,6 @@ const CONFIG: RuinHoundConfig = {
   deAggroRadius: 200,
   contactRadius: 30,
   arriveEpsilon: 4,
-  hitsToRepel: 2,
 };
 
 // Same behaviour but with a huge aggro radius, so the hound chases across the whole
@@ -53,7 +52,6 @@ describe('createHoundState', () => {
     expect(s.position).toEqual({ x: 200, y: 200 });
     expect(s.mode).toBe('patrol');
     expect(s.waypointIndex).toBe(1);
-    expect(s.hits).toBe(0);
   });
 });
 
@@ -161,26 +159,10 @@ describe('houndInContact', () => {
   });
 });
 
-describe('registerHoundHit', () => {
-  it('counts hits but stays engaged until the repel threshold', () => {
-    const chasing: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
-    const once = registerHoundHit(chasing, CONFIG); // hitsToRepel = 2
-    expect(once.hits).toBe(1);
-    expect(once.mode).toBe('chase');
-  });
-
-  it('flees once hits reach the repel threshold', () => {
-    const hurt: HoundState = { ...createHoundState(CONFIG), mode: 'chase', hits: 1 };
-    const repelled = registerHoundHit(hurt, CONFIG);
-    expect(repelled.hits).toBe(2);
-    expect(repelled.mode).toBe('flee');
-  });
-
-  it('does not mutate the input state', () => {
-    const s: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
-    registerHoundHit(s, CONFIG);
-    expect(s.hits).toBe(0);
-    expect(s.mode).toBe('chase');
+describe('defeatHound', () => {
+  it('sends the hound into terminal flee', () => {
+    const s = createHoundState(CONFIG);
+    expect(defeatHound({ ...s, mode: 'chase' }).mode).toBe('flee');
   });
 });
 

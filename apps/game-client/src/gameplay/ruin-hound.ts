@@ -26,8 +26,6 @@ export interface HoundState {
   readonly mode: HoundMode;
   /** Patrol waypoint the hound is currently heading toward. */
   readonly waypointIndex: number;
-  /** Successful axe hits taken this encounter; at `hitsToRepel` the hound flees. */
-  readonly hits: number;
 }
 
 /** Benchmark-only tunables (temporary values; see core/config/benchmark.ts). */
@@ -46,8 +44,6 @@ export interface RuinHoundConfig {
   readonly contactRadius: number;
   /** How close (world px) counts as having reached a waypoint/home. */
   readonly arriveEpsilon: number;
-  /** Successful axe hits needed to drive the hound off (benchmark stub). */
-  readonly hitsToRepel: number;
   /** Speed multiplier while fleeing; defaults to 1.3 when omitted. */
   readonly fleeSpeedMultiplier?: number;
 }
@@ -62,7 +58,6 @@ export function createHoundState(config: RuinHoundConfig): HoundState {
     facing: DEFAULT_FACING,
     mode: 'patrol',
     waypointIndex: config.waypoints.length > 1 ? 1 : 0,
-    hits: 0,
   };
 }
 
@@ -72,14 +67,12 @@ export function houndInContact(state: HoundState, hunterPos: Vec2, config: RuinH
 }
 
 /**
- * Records a successful axe hit. Counts the hit and, once `hitsToRepel` is reached,
- * flips the hound to the terminal `flee` mode (a benchmark stub for
- * "incapacitate/flee" — no health or damage model). Pure.
+ * Marks a hound as defeated: it enters the terminal `flee` mode and runs off
+ * (the benchmark's "downed → vanish", GD-0007). The caller (sim) decides WHEN a
+ * hound is defeated, from HP. Pure.
  */
-export function registerHoundHit(state: HoundState, config: RuinHoundConfig): HoundState {
-  const hits = state.hits + 1;
-  const mode: HoundMode = hits >= config.hitsToRepel ? 'flee' : state.mode;
-  return { ...state, hits, mode };
+export function defeatHound(state: HoundState): HoundState {
+  return { ...state, mode: 'flee' };
 }
 
 /**
@@ -236,7 +229,6 @@ export function stepHound(
     facing: directionFromVector(intent, state.facing),
     mode,
     waypointIndex,
-    hits: state.hits,
   };
 }
 
