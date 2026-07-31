@@ -494,13 +494,21 @@ export class BenchmarkSimulation {
 
     // Task 4 / GD-0007: a hound that is NOT downed and in contact with the
     // player bites on its own per-hound cooldown (never every frame). A downed
-    // hound is frozen (see the step loop above) and cannot bite.
+    // hound is frozen (see the step loop above) and cannot bite. Nor can a
+    // hound already in terminal `flee` mode (defeated, fled the downed window)
+    // — it must not keep biting merely because it remains within contactRadius
+    // (e.g. cornered, or motionless in a speed-0 benchmark config): a
+    // defeated/fleeing entity deals no contact damage (GD-0007).
     this.houndAttackCooldownValues = this.houndAttackCooldownValues.map((cooldown, i) => {
       if (this.houndDownedTimers[i] > 0) {
         return cooldown;
       }
       const nextCooldown = cooldown - dtSeconds;
-      if (nextCooldown <= 0 && houndInContact(this.houndStates[i], this.state.position, this.houndConfigs[i])) {
+      if (
+        nextCooldown <= 0 &&
+        this.houndStates[i].mode !== 'flee' &&
+        houndInContact(this.houndStates[i], this.state.position, this.houndConfigs[i])
+      ) {
         this.hunterHp -= this.combatModel.hound.contactDamage;
         this.playerStruckThisFrame = true;
         return this.combatModel.hound.contactCooldownSeconds;

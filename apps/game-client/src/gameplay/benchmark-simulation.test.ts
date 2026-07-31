@@ -848,4 +848,65 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
     expect(sim.playerStruck).toBe(true);
   });
+
+  // Starts 10 units east of spawn (inside `minDistance` = footprintRadius(20) +
+  // CONFIG.footprintRadius(16) = 36) so GD-0006's chase-mode combat separation
+  // pushes it OUTWARD along the same (east) axis it already occupies, settling
+  // it deterministically ~36 units due east of the Hunter — simultaneously
+  // inside contactRadius (40, so passive bites land) and attackRange (60, so
+  // `tryAttack` can also reach it) once the Hunter faces east. This avoids the
+  // direction ambiguity `contactHoundConfig` above would hit here: starting
+  // exactly ON the Hunter's spawn point, separation's push direction depends on
+  // which way the Hunter happened to nudge on the very first frame.
+  const eastOfSpawnHoundConfig = (spawn: Vec2): RuinHoundConfig => ({
+    speed: 0,
+    footprintRadius: 20,
+    waypoints: [vec2(spawn.x + 10, spawn.y), vec2(spawn.x + 10, spawn.y)],
+    aggroRadius: 1000,
+    deAggroRadius: 2000,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+    fleeSpeedMultiplier: 1.4,
+  });
+
+  it('a defeated hound in flee mode does not bite the player, even while still in contact (GD-0007)', () => {
+    const world = openWorld();
+    const sim = new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [
+      eastOfSpawnHoundConfig(world.spawn),
+    ]);
+
+    // Face east (aligning with the hound) and drive it to defeat with the axe:
+    // COMBAT_MODEL's hound maxHp (2) / playerAttackDamage (1) => two connecting
+    // swings, each separated by a cooldown wait — same loop shape as "drives
+    // the hound off" above.
+    sim.update(set('move-east'), 1 / 60);
+    let defeated = false;
+    for (let i = 0; i < 300 && !defeated; i += 1) {
+      if (sim.tryAttack().repelled) {
+        defeated = true;
+      }
+      sim.update(noActions, 1 / 60);
+    }
+    expect(defeated).toBe(true);
+    expect(sim.houndDowned[0]).toBe(true); // downed, not yet fled
+
+    // Wait out the downed timer: the hound flips to `flee` while remaining
+    // motionless (speed 0) at the same in-contact position.
+    for (let i = 0; i < 120 && sim.hounds[0]?.mode !== 'flee'; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.hounds[0]?.mode).toBe('flee');
+    expect(sim.inDanger).toBe(true); // still within contactRadius — the case under test
+
+    const hpAtFlee = sim.playerHp;
+    // Advance well past the bite cooldown (contactCooldownSeconds = 1.2) while
+    // the fled hound stays put and in contact: without a mode guard on the bite
+    // loop, the very next cooldown expiry would land another bite.
+    for (let i = 0; i < 200; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.hounds[0]?.mode).toBe('flee');
+    expect(sim.inDanger).toBe(true);
+    expect(sim.playerHp).toBe(hpAtFlee); // a fleeing (defeated) hound must not bite
+  });
 });
