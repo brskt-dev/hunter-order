@@ -7,6 +7,7 @@ export {
   type AttackResult,
   BenchmarkSimulation,
   type CollectedItem,
+  type CombatModelConfig,
   type HunterSimConfig,
   type HunterState,
   stepHunter,

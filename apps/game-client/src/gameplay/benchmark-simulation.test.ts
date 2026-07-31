@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BenchmarkSimulation,
+  type CombatModelConfig,
   type HunterSimConfig,
   type StandInSimConfig,
   stepHunter,
@@ -20,6 +21,15 @@ const CONFIG: HunterSimConfig = {
   attackArcCos: 0.5,
   attackCooldownSeconds: 0.35,
   pointBlankRange: 30,
+};
+
+// Mirrors BENCHMARK.combatModel's shape (GD-0007); kept independent so this
+// suite stays decoupled from core/config, same as CONFIG above.
+const COMBAT_MODEL: CombatModelConfig = {
+  hunterMaxHp: 5,
+  playerAttackDamage: 1,
+  hound: { maxHp: 2, contactDamage: 1, contactCooldownSeconds: 1.2, downedSeconds: 0.6 },
+  standIn: { maxHp: 3, punchDamage: 1, downedSeconds: 0.6 },
 };
 
 // An overgrowth obstruction just east of the open-world spawn (x=264): its left
@@ -68,20 +78,20 @@ const set = (...actions: MovementAction[]): ReadonlySet<MovementAction> => new S
 
 describe('BenchmarkSimulation', () => {
   it('spawns at the world spawn point facing south', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     expect(sim.hunter.position).toEqual({ x: 264, y: 264 });
     expect(sim.hunter.facing).toBe('s');
   });
 
   it('stays put and keeps facing when idle', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     sim.update(noActions, 1 / 60);
     expect(sim.hunter.position).toEqual({ x: 264, y: 264 });
     expect(sim.hunter.facing).toBe('s');
   });
 
   it('moves in the intent direction and updates facing', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     sim.update(set('move-east'), 1 / 60);
     expect(sim.hunter.position.x).toBeGreaterThan(264);
     expect(sim.hunter.position.y).toBeCloseTo(264);
@@ -89,14 +99,14 @@ describe('BenchmarkSimulation', () => {
   });
 
   it('keeps the last facing after movement stops', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     sim.update(set('move-east'), 1 / 60);
     sim.update(noActions, 1 / 60);
     expect(sim.hunter.facing).toBe('e');
   });
 
   it('cannot walk through a solid wall', () => {
-    const sim = new BenchmarkSimulation(walledWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(walledWorld(), CONFIG, COMBAT_MODEL);
     for (let i = 0; i < 200; i += 1) {
       sim.update(set('move-east'), 1 / 60);
     }
@@ -105,7 +115,7 @@ describe('BenchmarkSimulation', () => {
   });
 
   it('resets to the spawn state', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     sim.update(set('move-east'), 1);
     sim.reset();
     expect(sim.hunter.position).toEqual({ x: 264, y: 264 });
@@ -142,20 +152,20 @@ describe('BenchmarkSimulation — environmental interaction', () => {
   };
 
   it('blocks movement through an active obstruction', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     approachEast(sim);
     expect(sim.hunter.position.x).toBeLessThanOrEqual(336 - CONFIG.footprintRadius + 1e-6);
   });
 
   it('has no target at spawn but acquires one after approaching', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     expect(sim.target).toBeNull();
     approachEast(sim);
     expect(sim.target?.id).toBe('roots');
   });
 
   it('clears the target on interact and then lets the Hunter pass', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     approachEast(sim);
     const blockedX = sim.hunter.position.x;
 
@@ -168,7 +178,7 @@ describe('BenchmarkSimulation — environmental interaction', () => {
   });
 
   it('interact is single-fire and a no-op with no target in range', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     expect(sim.tryInteract()).toBeNull(); // far away at spawn
     approachEast(sim);
     expect(sim.tryInteract()?.id).toBe('roots');
@@ -176,7 +186,7 @@ describe('BenchmarkSimulation — environmental interaction', () => {
   });
 
   it('reset restores interactables to active', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     approachEast(sim);
     sim.tryInteract();
     sim.reset();
@@ -198,12 +208,12 @@ describe('BenchmarkSimulation — item pickup / possession log', () => {
   };
 
   it('has an empty possession log at spawn', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [fragment()]);
     expect(sim.collected).toEqual([]);
   });
 
   it('does not block movement (the Hunter walks over a collectible)', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [fragment()]);
     for (let i = 0; i < 200; i += 1) {
       sim.update(set('move-east'), 1 / 60);
     }
@@ -213,7 +223,7 @@ describe('BenchmarkSimulation — item pickup / possession log', () => {
   });
 
   it('records the item in the possession log when picked up', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [fragment()]);
     moveEastUntilTarget(sim, 'fragment');
     expect(sim.target?.id).toBe('fragment');
 
@@ -226,14 +236,14 @@ describe('BenchmarkSimulation — item pickup / possession log', () => {
   });
 
   it('does not record possession when clearing a non-collectible obstruction', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [overgrowth()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [overgrowth()]);
     moveEastUntilTarget(sim, 'roots');
     sim.tryInteract();
     expect(sim.collected).toEqual([]);
   });
 
   it('pickup is single-fire (no duplicate possession record)', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [fragment()]);
     moveEastUntilTarget(sim, 'fragment');
     expect(sim.tryInteract()?.id).toBe('fragment');
     expect(sim.tryInteract()).toBeNull();
@@ -241,7 +251,7 @@ describe('BenchmarkSimulation — item pickup / possession log', () => {
   });
 
   it('reset empties the possession log and restores the item', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [fragment()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [fragment()]);
     moveEastUntilTarget(sim, 'fragment');
     sim.tryInteract();
     sim.reset();
@@ -260,14 +270,13 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
     deAggroRadius: 260,
     contactRadius: 40,
     arriveEpsilon: 6,
-    hitsToRepel: 2,
   });
 
   const withHound = (): BenchmarkSimulation =>
-    new BenchmarkSimulation(openWorld(), CONFIG, [], [houndConfig()]);
+    new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [houndConfig()]);
 
   it('has no hound and no threat when none is configured', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     expect(sim.hounds.length).toBe(0);
     expect(sim.threatEngaged).toBe(false);
     expect(sim.inDanger).toBe(false);
@@ -323,10 +332,9 @@ describe('BenchmarkSimulation — ruin-hound threat', () => {
       deAggroRadius: 2000,
       contactRadius: 40,
       arriveEpsilon: 6,
-      hitsToRepel: 2,
       fleeSpeedMultiplier: 1.4,
     };
-    const sim = new BenchmarkSimulation(world, CONFIG, [], [engagedHoundConfig]);
+    const sim = new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [engagedHoundConfig]);
     sim.update(noActions, 0.1); // no movement input; hound chases onto the Hunter
     const h = sim.hounds[0];
     const dist = Math.hypot(
@@ -354,12 +362,11 @@ describe('BenchmarkSimulation — multiple hounds (GD-0006 pack)', () => {
       deAggroRadius: 2000,
       contactRadius: 40,
       arriveEpsilon: 6,
-      hitsToRepel: 2,
       fleeSpeedMultiplier: 1.4,
     });
     // Two hounds spawned on top of the Hunter (and each other) — both chase
     // immediately and must separate from the Hunter AND from each other.
-    const sim = new BenchmarkSimulation(world, CONFIG, [], [mk(5, 5), mk(5, 5)]);
+    const sim = new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [mk(5, 5), mk(5, 5)]);
     sim.update(noActions, 0.1);
     const [h0, h1] = sim.hounds;
     const pairDist = Math.hypot(h0.position.x - h1.position.x, h0.position.y - h1.position.y);
@@ -370,7 +377,7 @@ describe('BenchmarkSimulation — multiple hounds (GD-0006 pack)', () => {
   });
 
   it('tryAttack hits the nearest in-reach hound and reports its index', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [
       // Far hound, still in reach; near hound is the one that should be hit.
       {
         speed: 0,
@@ -380,7 +387,6 @@ describe('BenchmarkSimulation — multiple hounds (GD-0006 pack)', () => {
         deAggroRadius: 1000,
         contactRadius: 40,
         arriveEpsilon: 6,
-        hitsToRepel: 2,
       },
       {
         speed: 0,
@@ -390,15 +396,14 @@ describe('BenchmarkSimulation — multiple hounds (GD-0006 pack)', () => {
         deAggroRadius: 1000,
         contactRadius: 40,
         arriveEpsilon: 6,
-        hitsToRepel: 2,
       },
     ]);
     sim.update(set('move-east'), 1 / 60); // face east toward both hounds
     const result = sim.tryAttack();
     expect(result.hit).toBe(true);
     expect(result.hitIndex).toBe(1); // hound[1] (x=300) is nearer than hound[0] (x=310)
-    expect(sim.hounds[1].hits).toBe(1);
-    expect(sim.hounds[0].hits).toBe(0);
+    expect(sim.houndHp[1]).toBe(COMBAT_MODEL.hound.maxHp - 1);
+    expect(sim.houndHp[0]).toBe(COMBAT_MODEL.hound.maxHp);
   });
 });
 
@@ -413,11 +418,10 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
     deAggroRadius: 1000,
     contactRadius: 40,
     arriveEpsilon: 6,
-    hitsToRepel: 2,
   });
 
   it('swings but misses when nothing is in reach', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG); // no hound
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL); // no hound
     const r = sim.tryAttack();
     expect(r.swung).toBe(true);
     expect(r.hit).toBe(false);
@@ -426,7 +430,7 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
   });
 
   it('does not connect a second time while on cooldown', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60); // face east toward the hound, within reach
     const first = sim.tryAttack();
     expect(first.hit).toBe(true);
@@ -434,23 +438,44 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
     expect(sim.tryAttack().swung).toBe(false); // still cooling down
   });
 
-  it('drives the hound off (flee) after enough hits in reach', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
+  it('damages a hound on a connecting hit and defeats it at 0 HP (GD-0007)', () => {
+    // COMBAT_MODEL: hound maxHp 2, playerAttackDamage 1.
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [staticHound()]);
+    sim.update(set('move-east'), 1 / 60); // face east toward the hound, within reach
+    const first = sim.tryAttack();
+    expect(first.hit).toBe(true);
+    expect(first.repelled).toBe(false); // 2 -> 1
+    expect(sim.houndHp[0]).toBe(1);
+    sim.update(noActions, 0.4); // wait out the attack cooldown
+    const second = sim.tryAttack();
+    expect(second.repelled).toBe(true); // 1 -> 0 => defeated
+    expect(sim.houndHp[0]).toBe(0);
+    expect(sim.houndDowned[0]).toBe(true); // briefly downed before it flees
+  });
+
+  it('drives the hound off (flee) after enough hits, once the downed timer runs out (GD-0007)', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60); // face east toward the hound
-    let repelled = false;
-    for (let i = 0; i < 300 && !repelled; i += 1) {
+    let defeated = false;
+    for (let i = 0; i < 300 && !defeated; i += 1) {
       if (sim.tryAttack().repelled) {
-        repelled = true;
+        defeated = true;
       }
       sim.update(noActions, 1 / 60); // hold facing, advance the attack cooldown
     }
-    expect(repelled).toBe(true);
+    expect(defeated).toBe(true);
+    // Still downed (frozen), not yet fled — see the dedicated downed test above.
+    expect(sim.threatEngaged).toBe(true);
+    for (let i = 0; i < 120 && sim.hounds[0]?.mode !== 'flee'; i += 1) {
+      sim.update(noActions, 1 / 60); // wait out the downed timer
+    }
     expect(sim.hounds[0]?.mode).toBe('flee');
+    expect(sim.houndDowned[0]).toBe(false);
     expect(sim.threatEngaged).toBe(false);
   });
 
   it('reset clears combat so the hound can be fought again', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG, [], [staticHound()]);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [staticHound()]);
     sim.update(set('move-east'), 1 / 60);
     for (let i = 0; i < 300 && sim.hounds[0]?.mode !== 'flee'; i += 1) {
       sim.tryAttack();
@@ -459,7 +484,8 @@ describe('BenchmarkSimulation — axe attack (offense stub)', () => {
     expect(sim.hounds[0]?.mode).toBe('flee');
     sim.reset();
     expect(sim.hounds[0]?.mode).toBe('patrol');
-    expect(sim.hounds[0]?.hits).toBe(0);
+    expect(sim.houndHp[0]).toBe(COMBAT_MODEL.hound.maxHp);
+    expect(sim.houndDowned[0]).toBe(false);
     expect(sim.tryAttack().swung).toBe(true); // cooldown was reset
   });
 });
@@ -480,10 +506,19 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
   const standInSpawn = vec2(264, 304);
 
   const withStandIn = (spawn = standInSpawn): BenchmarkSimulation =>
-    new BenchmarkSimulation(openWorld(), CONFIG, [], [], standInConfig, spawn, pvpCombatSeconds);
+    new BenchmarkSimulation(
+      openWorld(),
+      CONFIG,
+      COMBAT_MODEL,
+      [],
+      [],
+      standInConfig,
+      spawn,
+      pvpCombatSeconds,
+    );
 
   it('has no stand-in and pvp is not engaged when none is configured', () => {
-    const sim = new BenchmarkSimulation(openWorld(), CONFIG);
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL);
     expect(sim.otherHunter).toBeNull();
     expect(sim.pvpEngaged).toBe(false);
   });
@@ -516,6 +551,52 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(sim.otherHunter!.position.y).toBeLessThan(before.y);
   });
 
+  // Waits out the player's own attack cooldown in small steps (rather than one
+  // big `dt`) so the retaliating stand-in's chase + combat-separation doesn't
+  // overshoot past the player in a single huge integration step and end up
+  // outside the facing arc — mirrors how the other stand-in tests step (1/60).
+  const settleAttackCooldown = (sim: BenchmarkSimulation): void => {
+    for (let i = 0; i < 30; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+  };
+
+  it('damages the stand-in on a connecting hit and downs it at 0 HP (GD-0007)', () => {
+    // No hound in reach; stand-in in front. standIn maxHp 3, playerAttackDamage 1.
+    const sim = withStandIn();
+    const first = sim.tryAttack(); // 3 -> 2, starts pvp
+    expect(first.hitOtherHunter).toBe(true);
+    expect(sim.standInHp).toBe(2);
+    expect(sim.pvpEngaged).toBe(true);
+    expect(sim.standInDowned).toBe(false);
+
+    settleAttackCooldown(sim);
+    sim.tryAttack(); // 2 -> 1
+    expect(sim.standInHp).toBe(1);
+    settleAttackCooldown(sim);
+    sim.tryAttack(); // 1 -> 0 => downed
+    expect(sim.standInHp).toBe(0);
+    expect(sim.standInDowned).toBe(true);
+  });
+
+  it('respawns the stand-in at full HP once the downed timer runs out (GD-0007)', () => {
+    const sim = withStandIn();
+    sim.tryAttack(); // 3 -> 2
+    settleAttackCooldown(sim);
+    sim.tryAttack(); // 2 -> 1
+    settleAttackCooldown(sim);
+    sim.tryAttack(); // 1 -> 0 => downed
+    expect(sim.standInDowned).toBe(true);
+
+    for (let i = 0; i < 120 && sim.standInDowned; i += 1) {
+      sim.update(noActions, 1 / 60); // wait out the downed timer
+    }
+    expect(sim.standInDowned).toBe(false);
+    expect(sim.standInHp).toBe(COMBAT_MODEL.standIn.maxHp);
+    expect(sim.otherHunter?.position).toEqual(standInSpawn);
+    expect(sim.pvpEngaged).toBe(false);
+  });
+
   it('a hound within reach wins over the stand-in (hitOtherHunter stays false)', () => {
     const staticHound: RuinHoundConfig = {
       speed: 0,
@@ -525,11 +606,11 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
       deAggroRadius: 1000,
       contactRadius: 40,
       arriveEpsilon: 6,
-      hitsToRepel: 2,
     };
     const sim = new BenchmarkSimulation(
       openWorld(),
       CONFIG,
+      COMBAT_MODEL,
       [],
       [staticHound],
       standInConfig,

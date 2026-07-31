@@ -33,11 +33,11 @@ import { intentFromActions, type MovementAction } from './movement-intent';
 import {
   combatSeparation,
   createHoundState,
+  defeatHound,
   houndInAttackReach,
   houndInContact,
   type HoundState,
   nearestOf,
-  registerHoundHit,
   type RuinHoundConfig,
   separatePairSymmetric,
   stepHound,
@@ -94,13 +94,45 @@ export interface HunterSimConfig {
   readonly pointBlankRange: number;
 }
 
-/** Outcome of an axe swing (benchmark stub — no damage model). */
+/**
+ * Benchmark combat model (GD-0007 — BENCHMARK-ONLY, non-authoritative): HP,
+ * fixed per-hit damage, and brief "downed" durations for the player, hounds
+ * and the stand-in. Mirrors `BENCHMARK.combatModel` shape-for-shape; passed in
+ * (rather than imported) so this module stays Phaser/config-free and
+ * unit-testable in isolation. Provisional tuning, not approved balance.
+ */
+export interface CombatModelConfig {
+  /** Player Hunter max HP. */
+  readonly hunterMaxHp: number;
+  /** Damage the player's axe/punch deals per connecting hit. */
+  readonly playerAttackDamage: number;
+  readonly hound: {
+    /** Hound max HP (was the `hitsToRepel` repel stub). */
+    readonly maxHp: number;
+    /** Damage a hound deals to the player per contact bite (Task 4 — unused here). */
+    readonly contactDamage: number;
+    /** Seconds between a hound's contact bites (Task 4 — unused here). */
+    readonly contactCooldownSeconds: number;
+    /** Seconds a hound stays "downed" (frozen) after reaching 0 HP, before it flees. */
+    readonly downedSeconds: number;
+  };
+  readonly standIn: {
+    /** Stand-in Hunter max HP. */
+    readonly maxHp: number;
+    /** Damage the stand-in's punch deals to the player (Task 4 — unused here). */
+    readonly punchDamage: number;
+    /** Seconds the stand-in stays "downed" after reaching 0 HP, before it respawns. */
+    readonly downedSeconds: number;
+  };
+}
+
+/** Outcome of an axe swing (benchmark stub — no hitbox/knockback model). */
 export interface AttackResult {
   /** The swing actually happened (false when still on cooldown). */
   readonly swung: boolean;
   /** The swing connected with a hound. */
   readonly hit: boolean;
-  /** This hit drove the hound off (transition into flee). */
+  /** This hit defeated the hound (HP reached 0) — it is now briefly downed, then flees. */
   readonly repelled: boolean;
   /** Index into `hounds` of the hound that was hit, or null when none was. */
   readonly hitIndex: number | null;
@@ -189,10 +221,25 @@ export class BenchmarkSimulation {
   private standInCooldown = 0;
   /** True for exactly the frame the stand-in's punch connects — a pulse, not a state. */
   private standInStruckThisFrame = false;
+  /** Player Hunter HP (GD-0007). Never reduced by this task — see `get playerHp`. */
+  private hunterHp: number;
+  /** Each hound's current HP, index-stable with `houndStates`/`houndConfigs` (GD-0007). */
+  private houndHpValues: number[];
+  /**
+   * Seconds remaining a hound stays "downed" (frozen, not stepped) after
+   * reaching 0 HP; 0 means not downed. Index-stable with `houndStates` (GD-0007).
+   */
+  private houndDownedTimers: number[];
+  /** The stand-in Hunter's current HP (GD-0007). */
+  private standInHpValue: number;
+  /** Seconds remaining the stand-in stays "downed" after reaching 0 HP; 0 means not downed. */
+  private standInDownedTimerValue = 0;
 
   constructor(
     private readonly world: TileWorld,
     private readonly config: HunterSimConfig,
+    /** Benchmark HP/damage/downed tunables (GD-0007) — see `CombatModelConfig`. */
+    private readonly combatModel: CombatModelConfig,
     interactables: readonly Interactable[] = [],
     private readonly houndConfigs: readonly RuinHoundConfig[] = [],
     /** Stand-in "other player" Hunter tunables, or null to omit it entirely. */
@@ -207,6 +254,11 @@ export class BenchmarkSimulation {
     this.state = BenchmarkSimulation.spawnState(world);
     this.houndStates = this.houndConfigs.map((c) => createHoundState(c));
     this.otherHunterState = BenchmarkSimulation.spawnStandIn(standInConfig, standInSpawn);
+    this.hunterHp = combatModel.hunterMaxHp;
+    this.houndHpValues = this.houndConfigs.map(() => combatModel.hound.maxHp);
+    this.houndDownedTimers = this.houndConfigs.map(() => 0);
+    this.standInHpValue = combatModel.standIn.maxHp;
+    this.standInDownedTimerValue = 0;
     this.recomputeTarget();
   }
 
@@ -268,6 +320,36 @@ export class BenchmarkSimulation {
     return this.standInStruckThisFrame;
   }
 
+  /** The player Hunter's current HP (GD-0007). Never reduced by this task (Task 4). */
+  get playerHp(): number {
+    return this.hunterHp;
+  }
+
+  /** Each hound's current HP, index-stable with `hounds` (GD-0007). */
+  get houndHp(): readonly number[] {
+    return this.houndHpValues;
+  }
+
+  /** The stand-in Hunter's current HP (GD-0007). */
+  get standInHp(): number {
+    return this.standInHpValue;
+  }
+
+  /**
+   * True for a hound that is "downed" — defeated (0 HP) but not yet fled: it is
+   * frozen in place for `combatModel.hound.downedSeconds` before its mode flips
+   * to `flee` (GD-0007). Index-stable with `hounds`.
+   */
+  get houndDowned(): readonly boolean[] {
+    return this.houndDownedTimers.map((t) => t > 0);
+  }
+
+  /** True while the stand-in is "downed" — defeated (0 HP), frozen before it
+   * respawns at its spawn point (GD-0007). */
+  get standInDowned(): boolean {
+    return this.standInDownedTimerValue > 0;
+  }
+
   /**
    * Candidate targets a hound may chase, nearest-first resolution is left to the
    * caller (`nearestOf`). The Hunter, plus the combat-sandbox stand-in Hunter
@@ -288,8 +370,17 @@ export class BenchmarkSimulation {
     // same target via a soft separation so it holds at biting distance instead of
     // stacking on the target's centre. Benchmark scope: only hounds are displaced
     // here — a Hunter never moves as a result of this pass.
+    //
+    // GD-0007: a hound at 0 HP is "downed" (`houndDownedTimers[i] > 0`) — frozen
+    // in place, skipped here and in the creature<->creature pass below; once its
+    // timer runs out this frame, `defeatHound` flips it into terminal `flee`.
     const hunterPositions = this.hunterPositions();
+    const nextHoundDownedTimers = this.houndDownedTimers.slice();
     const hounds = this.houndStates.map((houndState, i) => {
+      if (nextHoundDownedTimers[i] > 0) {
+        nextHoundDownedTimers[i] = Math.max(0, nextHoundDownedTimers[i] - dtSeconds);
+        return nextHoundDownedTimers[i] === 0 ? defeatHound(houndState) : houndState;
+      }
       const houndConfig = this.houndConfigs[i];
       const target = nearestOf(houndState.position, hunterPositions) ?? this.state.position;
       let hound = stepHound(houndState, target, dtSeconds, this.world, houndConfig);
@@ -309,15 +400,22 @@ export class BenchmarkSimulation {
       }
       return hound;
     });
+    this.houndDownedTimers = nextHoundDownedTimers;
 
     // Creature<->creature pass (GD-0006): engaged hounds push each other apart so
     // a pack does not stack on one spot. Two iterations for stability with more
     // than a pair; each pushed position is re-resolved against world solids/bounds.
-    // Only hounds move here too — never a Hunter.
+    // Only hounds move here too — never a Hunter. A downed hound (GD-0007) is
+    // frozen and excluded here too.
     for (let iteration = 0; iteration < 2; iteration += 1) {
       for (let i = 0; i < hounds.length; i += 1) {
         for (let j = i + 1; j < hounds.length; j += 1) {
-          if (hounds[i].mode !== 'chase' || hounds[j].mode !== 'chase') {
+          if (
+            nextHoundDownedTimers[i] > 0 ||
+            nextHoundDownedTimers[j] > 0 ||
+            hounds[i].mode !== 'chase' ||
+            hounds[j].mode !== 'chase'
+          ) {
             continue;
           }
           const minDistance =
@@ -352,58 +450,74 @@ export class BenchmarkSimulation {
     }
     this.houndStates = hounds;
 
-    // Stand-in "other player" Hunter (GD-0006 PvP test-bed stub, no damage model):
-    // wanders when idle, chases/punches the player while `pvpEngaged`. While engaged, it is
-    // also pushed off the player via the same soft combat separation used for
-    // hounds — only the stand-in is displaced here, re-resolved against world
-    // solids; the player (`this.state`) never moves as a result of this pass.
-    if (this.otherHunterState) {
-      let otherHunter = stepStandInHunter(
-        this.otherHunterState,
-        this.state.position,
-        this.pvpEngaged,
-        dtSeconds,
-        this.world,
-        this.standInConfig!,
-      );
-      if (this.pvpEngaged) {
-        const minDistance = this.standInConfig!.footprintRadius + this.config.footprintRadius;
-        const separated = combatSeparation(otherHunter.position, this.state.position, minDistance);
-        if (separated !== otherHunter.position) {
-          const position = resolveMovement(
-            otherHunter.position,
-            separated,
-            this.standInConfig!.footprintRadius,
-            this.world.solids,
-            this.world.bounds,
-          );
-          otherHunter = { ...otherHunter, position };
-        }
+    // GD-0007: a downed stand-in (0 HP) is frozen — skip its movement/attack
+    // entirely and count down to a respawn instead. When the timer runs out this
+    // frame, it reappears at its original spawn at full HP and the mutual-combat
+    // timer clears (mirrors a hound's downed->flee, but the stand-in respawns
+    // rather than fleeing off-screen).
+    if (this.standInDownedTimerValue > 0) {
+      this.standInDownedTimerValue = Math.max(0, this.standInDownedTimerValue - dtSeconds);
+      if (this.standInDownedTimerValue === 0) {
+        this.otherHunterState = BenchmarkSimulation.spawnStandIn(this.standInConfig, this.standInSpawn);
+        this.standInHpValue = this.combatModel.standIn.maxHp;
+        this.pvpTimer = 0;
       }
-      this.otherHunterState = otherHunter;
-    }
+      this.standInStruckThisFrame = false;
+    } else {
+      // Stand-in "other player" Hunter (GD-0006 PvP test-bed stub, no damage
+      // model on ITS punch — see Task 4): wanders when idle, chases/punches the
+      // player while `pvpEngaged`. While engaged, it is also pushed off the
+      // player via the same soft combat separation used for hounds — only the
+      // stand-in is displaced here, re-resolved against world solids; the player
+      // (`this.state`) never moves as a result of this pass.
+      if (this.otherHunterState) {
+        let otherHunter = stepStandInHunter(
+          this.otherHunterState,
+          this.state.position,
+          this.pvpEngaged,
+          dtSeconds,
+          this.world,
+          this.standInConfig!,
+        );
+        if (this.pvpEngaged) {
+          const minDistance = this.standInConfig!.footprintRadius + this.config.footprintRadius;
+          const separated = combatSeparation(otherHunter.position, this.state.position, minDistance);
+          if (separated !== otherHunter.position) {
+            const position = resolveMovement(
+              otherHunter.position,
+              separated,
+              this.standInConfig!.footprintRadius,
+              this.world.solids,
+              this.world.bounds,
+            );
+            otherHunter = { ...otherHunter, position };
+          }
+        }
+        this.otherHunterState = otherHunter;
+      }
 
-    // Stand-in's punch (GD-0006 stub — no damage model; a visual/timer effect
-    // only, rendered by the scene). Off cooldown, while pvp is engaged and the
-    // stand-in is within its own attackRange of the player, it lands a punch:
-    // a one-frame pulse (`standInStruck`) plus a refresh of the mutual-combat
-    // timer, so the stand-in's own attacks keep the fight alive. The player
-    // (`this.state`) is never moved by this.
-    this.standInCooldown = Math.max(0, this.standInCooldown - dtSeconds);
-    if (this.otherHunterState && this.standInConfig && this.pvpEngaged && this.standInCooldown <= 0) {
-      const distance = length({
-        x: this.otherHunterState.position.x - this.state.position.x,
-        y: this.otherHunterState.position.y - this.state.position.y,
-      });
-      if (distance <= this.standInConfig.attackRange) {
-        this.standInStruckThisFrame = true;
-        this.standInCooldown = this.standInConfig.attackCooldownSeconds;
-        this.pvpTimer = this.pvpCombatSeconds;
+      // Stand-in's punch (GD-0006 stub — no damage model on the player yet, see
+      // Task 4; a visual/timer effect only, rendered by the scene). Off cooldown,
+      // while pvp is engaged and the stand-in is within its own attackRange of
+      // the player, it lands a punch: a one-frame pulse (`standInStruck`) plus a
+      // refresh of the mutual-combat timer, so the stand-in's own attacks keep
+      // the fight alive. The player (`this.state`) is never moved by this.
+      this.standInCooldown = Math.max(0, this.standInCooldown - dtSeconds);
+      if (this.otherHunterState && this.standInConfig && this.pvpEngaged && this.standInCooldown <= 0) {
+        const distance = length({
+          x: this.otherHunterState.position.x - this.state.position.x,
+          y: this.otherHunterState.position.y - this.state.position.y,
+        });
+        if (distance <= this.standInConfig.attackRange) {
+          this.standInStruckThisFrame = true;
+          this.standInCooldown = this.standInConfig.attackCooldownSeconds;
+          this.pvpTimer = this.pvpCombatSeconds;
+        } else {
+          this.standInStruckThisFrame = false;
+        }
       } else {
         this.standInStruckThisFrame = false;
       }
-    } else {
-      this.standInStruckThisFrame = false;
     }
 
     this.pvpTimer = Math.max(0, this.pvpTimer - dtSeconds);
@@ -432,10 +546,13 @@ export class BenchmarkSimulation {
   }
 
   /**
-   * Swings the hand axe (benchmark stub — no damage model). Off cooldown, the
-   * swing connects with the NEAREST hound that is within `attackRange` and the
-   * facing arc; the `hitsToRepel`-th hit on that hound drives it off (transition
-   * to flee). A hound already fled cannot be re-targeted.
+   * Swings the hand axe (benchmark stub — no hitbox/knockback model). Off
+   * cooldown, the swing connects with the NEAREST hound that is within
+   * `attackRange` and the facing arc, dealing `combatModel.playerAttackDamage`
+   * (GD-0007); the hit that brings it to 0 HP downs it (briefly frozen, then it
+   * flees — see `update`). A hound already fled cannot be re-targeted. When no
+   * hound is hit, a swing connecting with the stand-in instead damages it the
+   * same way. The player is never damaged by its own swing (obviously).
    */
   tryAttack(): AttackResult {
     if (this.attackCooldown > 0) {
@@ -448,7 +565,10 @@ export class BenchmarkSimulation {
     let nearestDistance = Infinity;
     for (let i = 0; i < this.houndStates.length; i += 1) {
       const houndState = this.houndStates[i];
-      if (houndState.mode === 'flee') {
+      // A fled hound is gone; a downed one (GD-0007) is already defeated and
+      // must not be re-targeted — otherwise repeated swings would keep
+      // refreshing `houndDownedTimers[i]` and it would never transition to flee.
+      if (houndState.mode === 'flee' || this.houndDownedTimers[i] > 0) {
         continue;
       }
       const inReach = houndInAttackReach(
@@ -472,16 +592,32 @@ export class BenchmarkSimulation {
       }
     }
     if (hitIndex !== null) {
-      const hit = registerHoundHit(this.houndStates[hitIndex], this.houndConfigs[hitIndex]);
-      this.houndStates = this.houndStates.map((h, i) => (i === hitIndex ? hit : h));
-      return { swung: true, hit: true, repelled: hit.mode === 'flee', hitIndex, hitOtherHunter: false };
+      // GD-0007: apply damage, then down the hound at 0 HP (the freeze/flee
+      // transition itself happens in `update`, driven by `houndDownedTimers`).
+      const remainingHp = Math.max(
+        0,
+        this.houndHpValues[hitIndex] - this.combatModel.playerAttackDamage,
+      );
+      const defeated = remainingHp <= 0;
+      this.houndHpValues = this.houndHpValues.map((hp, i) => (i === hitIndex ? remainingHp : hp));
+      if (defeated) {
+        this.houndDownedTimers = this.houndDownedTimers.map((t, i) =>
+          i === hitIndex ? this.combatModel.hound.downedSeconds : t,
+        );
+      }
+      return { swung: true, hit: true, repelled: defeated, hitIndex, hitOtherHunter: false };
     }
 
     // No hound was hit (a hound always takes priority when both are in reach):
-    // GD-0006 PvP test-bed stub — a swing that connects with the stand-in only
-    // starts the mutual-combat timer; there is no damage model.
+    // GD-0006 PvP test-bed stub — a swing that connects with the stand-in
+    // starts/refreshes the mutual-combat timer and, per GD-0007, deals the same
+    // per-hit damage; at 0 HP the stand-in is downed (see `update`).
+    // A downed stand-in (GD-0007, 0 HP) must not be re-targeted either — same
+    // reasoning as the hound guard above (would otherwise refresh its downed
+    // timer indefinitely and it would never respawn).
     if (
       this.otherHunterState &&
+      this.standInDownedTimerValue === 0 &&
       inAttackReach(
         this.otherHunterState.position,
         this.state.position,
@@ -491,6 +627,13 @@ export class BenchmarkSimulation {
         this.config.pointBlankRange,
       )
     ) {
+      this.standInHpValue = Math.max(
+        0,
+        this.standInHpValue - this.combatModel.playerAttackDamage,
+      );
+      if (this.standInHpValue <= 0) {
+        this.standInDownedTimerValue = this.combatModel.standIn.downedSeconds;
+      }
       this.pvpTimer = this.pvpCombatSeconds;
       return { swung: true, hit: false, repelled: false, hitIndex: null, hitOtherHunter: true };
     }
@@ -508,6 +651,12 @@ export class BenchmarkSimulation {
     this.attackCooldown = 0;
     this.standInCooldown = 0;
     this.standInStruckThisFrame = false;
+    // GD-0007: rebuild HP/downed state to match a fresh encounter.
+    this.hunterHp = this.combatModel.hunterMaxHp;
+    this.houndHpValues = this.houndConfigs.map(() => this.combatModel.hound.maxHp);
+    this.houndDownedTimers = this.houndConfigs.map(() => 0);
+    this.standInHpValue = this.combatModel.standIn.maxHp;
+    this.standInDownedTimerValue = 0;
     this.recomputeTarget();
   }
 

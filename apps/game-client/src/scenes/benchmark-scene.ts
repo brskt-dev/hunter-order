@@ -249,6 +249,7 @@ export class BenchmarkScene extends BaseScene {
         attackCooldownSeconds: BENCHMARK.combat.attackCooldownSeconds,
         pointBlankRange: BENCHMARK.combat.pointBlankRange,
       },
+      BENCHMARK.combatModel,
       interactables,
       this.buildHoundConfigs(),
       standInConfig,
@@ -310,7 +311,6 @@ export class BenchmarkScene extends BaseScene {
       deAggroRadius: h.deAggroRadius,
       contactRadius: h.contactRadius,
       arriveEpsilon: h.arriveEpsilon,
-      hitsToRepel: h.hitsToRepel,
       fleeSpeedMultiplier: h.fleeSpeedMultiplier,
     });
     const primary = withWaypoints(h.patrolTiles.map((t) => tileCentre(t.col, t.row, ts)));
