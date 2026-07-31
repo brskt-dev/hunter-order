@@ -8,6 +8,7 @@ import {
   type Direction8,
   directionalFrameKey,
   directionToVector,
+  houndInContact,
   type HoundState,
   type ImpactFeel,
   intentFromActions,
@@ -108,6 +109,28 @@ const HOUND_TICK_RADIUS = 12;
 // Peak alpha of the danger vignette when the hound is in contact (restrained).
 const DANGER_MAX_ALPHA = 0.22;
 
+// Restrained over-head HP bar geometry (GD-0007): back plate + fill, shared by
+// the hound and stand-in bars. The fill's origin is its left edge (0, 0.5) so
+// it depletes toward the right edge, like a conventional HP bar.
+const HP_BAR_WIDTH = 30;
+const HP_BAR_HEIGHT = 4;
+const HP_BAR_PADDING = 1;
+// Fill dips to `colors.hpBarLow` at/under this HP ratio (a third).
+const LOW_HP_RATIO = 1 / 3;
+// Vertical offset (world px) of each over-head bar above its entity's pivot.
+const HOUND_HP_BAR_OFFSET_Y = HOUND_BODY_HEIGHT + 10;
+const STANDIN_HP_BAR_OFFSET_Y = BODY_HEIGHT * 0.8;
+
+// The player's fixed corner HP bar (screen-fixed, discreet — GD-0007).
+const PLAYER_HP_BAR_WIDTH = 90;
+const PLAYER_HP_BAR_HEIGHT = 8;
+const PLAYER_HP_BAR_MARGIN = 16;
+
+// Brief screen-flash duration on a defeat-triggered respawn (GD-0007).
+const RESPAWN_FLASH_MS = 450;
+// Peak alpha of the respawn flash (restrained, not a full whiteout).
+const RESPAWN_FLASH_ALPHA = 0.5;
+
 // Scalar frame-rate-independent smoothing toward a target (companion to the
 // Vec2 `smoothTowards`): the same 1 - e^(-rate*dt) curve.
 const approach = (current: number, target: number, rate: number, dt: number): number =>
@@ -141,6 +164,13 @@ interface HoundView {
   sprite?: Phaser.GameObjects.Sprite;
   facingTick?: Phaser.GameObjects.Rectangle;
   prev?: Vec2;
+  /** Over-head HP bar (GD-0007): back plate + fill, world-space UI (not a
+   * container child) so it isn't affected by the downed-cue alpha dip. */
+  hpBarBack: Phaser.GameObjects.Rectangle;
+  hpBarFill: Phaser.GameObjects.Rectangle;
+  /** Previous frame's `houndDowned[i]`, used to detect the downed->flee
+   * transition (the moment `fadeOutHound` should actually start fading it). */
+  wasDowned?: boolean;
 }
 
 /** Render state for the combat-sandbox stand-in "other player" Hunter (GD-0006). */
@@ -151,6 +181,9 @@ interface StandInView {
   facingTick?: Phaser.GameObjects.Rectangle;
   /** Real directional TEST Hunter sprite; undefined when falling back to the greybox. */
   sprite?: Phaser.GameObjects.Sprite;
+  /** Over-head HP bar (GD-0007): back plate + fill, mirrors `HoundView`. */
+  hpBarBack: Phaser.GameObjects.Rectangle;
+  hpBarFill: Phaser.GameObjects.Rectangle;
 }
 
 /** The PvP "EM COMBATE" indicator (ring + label) that floats above the stand-in
@@ -183,6 +216,9 @@ export class BenchmarkScene extends BaseScene {
     Phaser.GameObjects.Image | Phaser.GameObjects.Shape
   >();
   private houndViews: HoundView[] = [];
+  /** Index-stable with `sim.hounds`/`houndViews` (GD-0007); kept so the scene
+   * can re-derive per-hound contact for the HP-bar visibility rule. */
+  private houndConfigs: RuinHoundConfig[] = [];
   private houndRunReady = false;
   /** Index into `houndViews` that gets the per-hound recoil/flash/hit-stop hold
    * (the hound the axe actually connected with), or null when none. */
@@ -196,6 +232,9 @@ export class BenchmarkScene extends BaseScene {
   private standInPrev?: Vec2;
   private combatMarker?: CombatMarkerView;
   private dangerOverlay?: Phaser.GameObjects.Rectangle;
+  /** The player's fixed corner HP bar fill (GD-0007); rebuilt in `create()`.
+   * The back plate needs no runtime updates, so only the fill is kept. */
+  private playerHpFill?: Phaser.GameObjects.Rectangle;
   private readonly pressedCodes = new Set<string>();
   private interactQueued = false;
   private attackQueued = false;
@@ -238,6 +277,9 @@ export class BenchmarkScene extends BaseScene {
     const standInSpawn = otherHunterTile
       ? tileCentre(otherHunterTile.col, otherHunterTile.row, BENCHMARK.tileSize)
       : null;
+    // Stored so the scene can re-derive per-hound contact for the HP-bar
+    // visibility rule (index-stable with `sim.hounds`/`houndViews`, GD-0007).
+    this.houndConfigs = this.buildHoundConfigs();
     this.sim = new BenchmarkSimulation(
       this.world,
       {
@@ -251,7 +293,7 @@ export class BenchmarkScene extends BaseScene {
       },
       BENCHMARK.combatModel,
       interactables,
-      this.buildHoundConfigs(),
+      this.houndConfigs,
       standInConfig,
       standInSpawn,
       BENCHMARK.sandbox.pvpCombatSeconds,
@@ -291,6 +333,7 @@ export class BenchmarkScene extends BaseScene {
     this.addHint();
     this.createSatchel();
     this.createDangerOverlay();
+    this.createPlayerHpBar();
   }
 
   /**
@@ -344,6 +387,19 @@ export class BenchmarkScene extends BaseScene {
     if (this.sim.standInStruck) {
       this.handleStandInStruck();
     }
+
+    // `playerStruck`/`playerDefeatedThisFrame` are ONE-FRAME pulses (never
+    // latched, GD-0007) — read them right here, every frame, immediately after
+    // `sim.update`. `playerStruck` covers ANY damage source (hound bite or the
+    // stand-in's punch — `handleStandInStruck` above only starts its punch
+    // pose, so the flash below fires exactly once per struck frame either way).
+    if (this.sim.playerStruck) {
+      this.showPlayerHitFlash();
+    }
+    if (this.sim.playerDefeatedThisFrame) {
+      this.showRespawnFlash();
+    }
+    this.updatePlayerHpBar();
 
     if (this.interactQueued) {
       this.interactQueued = false;
@@ -418,6 +474,10 @@ export class BenchmarkScene extends BaseScene {
    */
   private renderHounds(): void {
     const hounds = this.sim.hounds;
+    const houndHp = this.sim.houndHp;
+    const houndDowned = this.sim.houndDowned;
+    const maxHp = BENCHMARK.combatModel.hound.maxHp;
+    const hunterPosition = this.sim.hunter.position;
     for (let i = 0; i < hounds.length; i += 1) {
       const state = hounds[i];
       const view = this.houndViews[i];
@@ -458,6 +518,34 @@ export class BenchmarkScene extends BaseScene {
           -HOUND_BODY_HEIGHT * 0.5 + tick.y * HOUND_TICK_RADIUS,
         );
       }
+
+      // GD-0007: over-head HP bar — shown only while engaged (chasing), in
+      // contact, or damaged; hidden otherwise (restrained, no always-on bars).
+      const config = this.houndConfigs[i];
+      const engaged =
+        state.mode === 'chase' ||
+        (config ? houndInContact(state, hunterPosition, config) : false) ||
+        houndHp[i] < maxHp;
+      const barY = state.position.y - HOUND_HP_BAR_OFFSET_Y;
+      view.hpBarBack.setPosition(state.position.x, barY);
+      view.hpBarFill.setPosition(state.position.x - HP_BAR_WIDTH / 2 + HP_BAR_PADDING, barY);
+      this.setHpBarFill(view.hpBarFill, houndHp[i], maxHp);
+      view.hpBarBack.setVisible(engaged);
+      view.hpBarFill.setVisible(engaged);
+
+      // GD-0007: downed cue (a brief alpha dip) while frozen at 0 HP. The
+      // moment it flips back to not-downed, it has just transitioned to
+      // `flee` — restore full alpha and trigger `fadeOutHound` HERE (not at
+      // the finishing hit) so the fade doesn't fight this dip over the
+      // downed duration.
+      const nowDowned = houndDowned[i];
+      if (nowDowned) {
+        view.container.setAlpha(0.55);
+      } else if (view.wasDowned) {
+        view.container.setAlpha(1);
+        this.fadeOutHound(i);
+      }
+      view.wasDowned = nowDowned;
     }
   }
 
@@ -502,6 +590,23 @@ export class BenchmarkScene extends BaseScene {
         -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
       );
     }
+
+    // GD-0007: over-head HP bar — shown only while mutual combat is active or
+    // it's damaged; hidden otherwise. Mirrors the hound bar's rule.
+    const maxHp = BENCHMARK.combatModel.standIn.maxHp;
+    const hp = this.sim.standInHp;
+    const barY = position.y - STANDIN_HP_BAR_OFFSET_Y;
+    this.standIn.hpBarBack.setPosition(position.x, barY);
+    this.standIn.hpBarFill.setPosition(position.x - HP_BAR_WIDTH / 2 + HP_BAR_PADDING, barY);
+    this.setHpBarFill(this.standIn.hpBarFill, hp, maxHp);
+    const engaged = this.sim.pvpEngaged || hp < maxHp;
+    this.standIn.hpBarBack.setVisible(engaged);
+    this.standIn.hpBarFill.setVisible(engaged);
+
+    // GD-0007: downed cue (a brief alpha dip) while frozen at 0 HP awaiting
+    // respawn. No competing tween touches the stand-in's alpha elsewhere, so
+    // (unlike the hound) this can just be set unconditionally every frame.
+    this.standIn.container.setAlpha(this.sim.standInDowned ? 0.55 : 1);
 
     this.renderCombatMarker(position);
   }
@@ -862,7 +967,9 @@ export class BenchmarkScene extends BaseScene {
       .container(position.x, position.y, children)
       .setDepth(DEPTH.entity + position.y);
 
-    return { container, shadow, flash, sprite, facingTick };
+    const [hpBarBack, hpBarFill] = this.createHpBar(position.x, position.y - HOUND_HP_BAR_OFFSET_Y);
+
+    return { container, shadow, flash, sprite, facingTick, hpBarBack, hpBarFill };
   }
 
   /** True when the real TEST Hunter (Eduardo, the stand-in) idle art loaded
@@ -959,7 +1066,9 @@ export class BenchmarkScene extends BaseScene {
       .container(position.x, position.y, children)
       .setDepth(DEPTH.entity + position.y);
 
-    this.standIn = { container, shadow, sprite, facingTick };
+    const [hpBarBack, hpBarFill] = this.createHpBar(position.x, position.y - STANDIN_HP_BAR_OFFSET_Y);
+
+    this.standIn = { container, shadow, sprite, facingTick, hpBarBack, hpBarFill };
     this.createCombatMarker();
   }
 
@@ -1001,6 +1110,113 @@ export class BenchmarkScene extends BaseScene {
       .setScrollFactor(0)
       .setDepth(DEPTH.ui - 1)
       .setAlpha(0);
+  }
+
+  /**
+   * Builds one over-head HP bar (back plate + fill), initially hidden — a
+   * world-space UI pair, not a container child (GD-0007), so it's unaffected
+   * by the entity container's downed-cue alpha dip and is positioned/toggled
+   * independently each frame by the caller (`renderHounds`/`renderStandIn`).
+   * Shared by `createHoundView` and `createStandIn`.
+   */
+  private createHpBar(
+    x: number,
+    y: number,
+  ): [Phaser.GameObjects.Rectangle, Phaser.GameObjects.Rectangle] {
+    const { colors } = BENCHMARK;
+    const back = this.add
+      .rectangle(x, y, HP_BAR_WIDTH, HP_BAR_HEIGHT, colors.hpBarBack, 0.85)
+      .setDepth(DEPTH.worldUi)
+      .setVisible(false);
+    const fill = this.add
+      .rectangle(
+        x - HP_BAR_WIDTH / 2 + HP_BAR_PADDING,
+        y,
+        HP_BAR_WIDTH - HP_BAR_PADDING * 2,
+        HP_BAR_HEIGHT - HP_BAR_PADDING * 2,
+        colors.hpBarFill,
+        0.95,
+      )
+      .setOrigin(0, 0.5)
+      .setDepth(DEPTH.worldUi + 0.1)
+      .setVisible(false);
+    return [back, fill];
+  }
+
+  /**
+   * Sets an HP bar's fill width/colour from `hp`/`maxHp` — shared by the
+   * over-head hound/stand-in bars and the player's corner bar (GD-0007). The
+   * fill's origin is its left edge, so scaling shrinks it toward the right,
+   * like a conventional HP bar. Dips to `colors.hpBarLow` at/under a third HP.
+   */
+  private setHpBarFill(fill: Phaser.GameObjects.Rectangle, hp: number, maxHp: number): void {
+    const ratio = maxHp > 0 ? Phaser.Math.Clamp(hp / maxHp, 0, 1) : 0;
+    fill.setScale(ratio, 1);
+    fill.setFillStyle(ratio <= LOW_HP_RATIO ? BENCHMARK.colors.hpBarLow : BENCHMARK.colors.hpBarFill);
+  }
+
+  /**
+   * The player's fixed corner HP bar (GD-0007): screen-fixed and discreet,
+   * like the danger vignette/hint text. Rebuilt in `create()` (RESTART-SAFE).
+   */
+  private createPlayerHpBar(): void {
+    const { colors } = BENCHMARK;
+    const x = PLAYER_HP_BAR_MARGIN;
+    const y = PLAYER_HP_BAR_MARGIN;
+    this.add
+      .rectangle(x, y, PLAYER_HP_BAR_WIDTH, PLAYER_HP_BAR_HEIGHT, colors.hpBarBack, 0.85)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui);
+    this.playerHpFill = this.add
+      .rectangle(
+        x + HP_BAR_PADDING,
+        y + HP_BAR_PADDING,
+        PLAYER_HP_BAR_WIDTH - HP_BAR_PADDING * 2,
+        PLAYER_HP_BAR_HEIGHT - HP_BAR_PADDING * 2,
+        colors.hpBarFill,
+        0.95,
+      )
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui + 0.1);
+  }
+
+  /** Refreshes the player's corner HP bar from `sim.playerHp`/`playerMaxHp`
+   * (GD-0007); called every `update`. */
+  private updatePlayerHpBar(): void {
+    if (!this.playerHpFill) {
+      return;
+    }
+    this.setHpBarFill(this.playerHpFill, this.sim.playerHp, this.sim.playerMaxHp);
+  }
+
+  /**
+   * Brief, restrained full-screen flash/fade on a defeat-triggered respawn
+   * (`sim.playerDefeatedThisFrame`, a one-frame pulse) — the sim has already
+   * snapped the player back to spawn and reset the encounter; this is purely
+   * a presentation cue that something happened. Screen-fixed, one-shot tween,
+   * self-destroying — mirrors `showPlayerHitFlash`'s tween idiom.
+   */
+  private showRespawnFlash(): void {
+    const flash = this.add
+      .rectangle(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2,
+        GAME_WIDTH,
+        GAME_HEIGHT,
+        BENCHMARK.colors.respawnFlash,
+      )
+      .setScrollFactor(0)
+      .setDepth(DEPTH.ui + 1)
+      .setAlpha(RESPAWN_FLASH_ALPHA);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: RESPAWN_FLASH_MS,
+      ease: 'Quad.easeOut',
+      onComplete: () => flash.destroy(),
+    });
   }
 
   private createPrompt(): void {
@@ -1139,8 +1355,11 @@ export class BenchmarkScene extends BaseScene {
       this.registerHit(result.hitIndex);
     }
     if (result.repelled && result.hitIndex !== null) {
+      // The finishing hit downs the hound (frozen, GD-0007); it only actually
+      // starts fleeing once `houndDowned[i]` clears, which is where
+      // `renderHounds` triggers `fadeOutHound` — not here, so the fade tween
+      // doesn't fight the downed-cue alpha dip over the downed duration.
       this.showDiscovery('The ruin hound is driven off — the pocket falls quiet.');
-      this.fadeOutHound(result.hitIndex);
       this.log.info('Benchmark combat: ruin hound repelled (benchmark stub)');
     }
   }
@@ -1178,15 +1397,17 @@ export class BenchmarkScene extends BaseScene {
   /**
    * Reacts to the stand-in landing its punch on the player this frame
    * (`sim.standInStruck`, a one-frame pulse — GD-0006 stub, visual/timer effect
-   * only, no damage model): plays the stand-in's punch pose and flashes the
-   * player. Never touches logical state.
+   * only, no damage model): plays the stand-in's punch pose. The player's hit
+   * flash is NOT triggered here — `sim.playerStruck` pulses on the same frame
+   * (GD-0007: it's a strict superset covering hound bites too), so `update`
+   * calls `showPlayerHitFlash` from that single generic check instead of here,
+   * avoiding a double-flash when both pulses fire together.
    */
   private handleStandInStruck(): void {
     const state = this.sim.otherHunter;
     if (state) {
       this.startStandInPunch(state.facing);
     }
-    this.showPlayerHitFlash();
   }
 
   /**
@@ -1209,9 +1430,11 @@ export class BenchmarkScene extends BaseScene {
     sprite.play(key, true);
   }
 
-  /** A brief, restrained flash over the player Hunter where the stand-in's punch
-   * lands, so the hit reads as connecting — the same tween'd-overlay idiom as
-   * `showCutFeedback`, on the effect layer above the Hunter. */
+  /** A brief, restrained flash over the player Hunter where a hit lands (a
+   * hound's contact bite or the stand-in's punch — GD-0007: driven by the
+   * generic `sim.playerStruck` pulse), so it reads as connecting — the same
+   * tween'd-overlay idiom as `showCutFeedback`, on the effect layer above the
+   * Hunter. */
   private showPlayerHitFlash(): void {
     const { position } = this.sim.hunter;
     const flash = this.add
@@ -1275,13 +1498,22 @@ export class BenchmarkScene extends BaseScene {
     });
   }
 
-  /** Fades the repelled hound's view out as it flees (the sim keeps stepping it off-screen). */
+  /**
+   * Fades the repelled hound's view out as it flees (the sim keeps stepping it
+   * off-screen) — triggered by `renderHounds` at the downed->flee transition,
+   * not at the finishing hit. Includes the HP bar (GD-0007) so a defeated
+   * hound's floating 0-HP bar doesn't linger visible+opaque as it recedes.
+   */
   private fadeOutHound(index: number): void {
     const view = this.houndViews[index];
     if (!view) {
       return;
     }
-    this.tweens.add({ targets: [view.container, view.shadow], alpha: 0, duration: 500 });
+    this.tweens.add({
+      targets: [view.container, view.shadow, view.hpBarBack, view.hpBarFill],
+      alpha: 0,
+      duration: 500,
+    });
   }
 
   /** Brief, self-fading discovery line near the top of the screen. */

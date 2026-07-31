@@ -312,5 +312,14 @@ export const BENCHMARK = {
     groundAlt: 0x35422f,
     dirt: 0x4a3f30,
     prompt: 0xf4f4ec,
+    // Restrained over-head/HUD HP bar (GD-0007): a dark back plate + a fill that
+    // dips to `hpBarLow` under a third HP. Never shown as an always-on MMO bar —
+    // the scene gates visibility to combat/damaged states.
+    hpBarBack: 0x1c1f1a,
+    hpBarFill: 0x7fbf6a,
+    hpBarLow: 0xc1503f,
+    // Brief, restrained screen flash on a defeat-triggered respawn (GD-0007) —
+    // a pale tone (matches `prompt`), not an alarming full-red flash.
+    respawnFlash: 0xf4f4ec,
   },
 } as const;
