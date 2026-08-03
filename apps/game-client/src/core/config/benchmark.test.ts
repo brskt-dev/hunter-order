@@ -99,6 +99,7 @@ describe('benchmark config', () => {
       c.hunterMaxHp, c.playerAttackDamage,
       c.hound.maxHp, c.hound.contactDamage, c.hound.contactCooldownSeconds, c.hound.downedSeconds,
       c.standIn.maxHp, c.standIn.punchDamage, c.standIn.downedSeconds,
+      c.playerInvulnSeconds, c.hound.windupSeconds, c.standIn.windupSeconds,
     ]) {
       expect(v).toBeGreaterThan(0);
     }

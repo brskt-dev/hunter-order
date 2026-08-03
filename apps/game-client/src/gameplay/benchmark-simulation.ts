@@ -106,6 +106,13 @@ export interface CombatModelConfig {
   readonly hunterMaxHp: number;
   /** Damage the player's axe/punch deals per connecting hit. */
   readonly playerAttackDamage: number;
+  /**
+   * Seconds of player invulnerability ("i-frames") after taking ANY damage (a
+   * hound bite or the stand-in's punch) and after a defeat-triggered respawn
+   * (GD-0007 combat feel). While active, `playerInvulnerable` is true and no
+   * further damage is applied.
+   */
+  readonly playerInvulnSeconds: number;
   readonly hound: {
     /** Hound max HP (was the `hitsToRepel` repel stub). */
     readonly maxHp: number;
@@ -115,6 +122,12 @@ export interface CombatModelConfig {
     readonly contactCooldownSeconds: number;
     /** Seconds a hound stays "downed" (frozen) after reaching 0 HP, before it flees. */
     readonly downedSeconds: number;
+    /**
+     * Seconds a hound "winds up" (telegraphs) before a contact bite resolves,
+     * once its contact cooldown is ready (GD-0007 combat feel), so the player
+     * can read and react to the attack.
+     */
+    readonly windupSeconds: number;
   };
   readonly standIn: {
     /** Stand-in Hunter max HP. */
@@ -123,6 +136,12 @@ export interface CombatModelConfig {
     readonly punchDamage: number;
     /** Seconds the stand-in stays "downed" after reaching 0 HP, before it respawns. */
     readonly downedSeconds: number;
+    /**
+     * Seconds the stand-in "winds up" (telegraphs) before its punch resolves,
+     * once its own cooldown is ready and the player is in range (GD-0007
+     * combat feel), mirroring the hound's `windupSeconds`.
+     */
+    readonly windupSeconds: number;
   };
 }
 
@@ -240,12 +259,34 @@ export class BenchmarkSimulation {
    * frame if in contact.
    */
   private houndAttackCooldownValues: number[];
+  /**
+   * Seconds remaining in each hound's attack wind-up (telegraph): 0 means no
+   * wind-up is running, index-stable with `houndStates` (GD-0007 combat feel).
+   * Starts once a hound's contact cooldown is ready while in contact; the
+   * bite resolves when it reaches 0. Cancelled (reset to 0) if the hound
+   * leaves contact, becomes downed, or flees before it completes.
+   */
+  private houndWindupTimer: number[];
+  /**
+   * Seconds remaining in the stand-in's punch wind-up (telegraph): 0 means no
+   * wind-up is running (GD-0007 combat feel). Starts once its own cooldown is
+   * ready while in range and pvp is engaged; the punch resolves when it
+   * reaches 0. Cancelled if it leaves range or pvp disengages before then.
+   */
+  private standInWindupTimer = 0;
   /** True for exactly the frame the player took ANY damage (hound bite or stand-in
    * punch) — a pulse, not a state, for the scene's hit-flash (Task 4 / GD-0007). */
   private playerStruckThisFrame = false;
   /** True for exactly the frame a defeat-triggered respawn happened (Task 4 /
    * GD-0007) — a pulse the scene uses for a brief cue. */
   private playerDefeatedThisFramePulse = false;
+  /**
+   * Seconds remaining of player invulnerability ("i-frames"): 0 means not
+   * invulnerable. Set to `combatModel.playerInvulnSeconds` whenever damage is
+   * actually applied to the player (a hound bite or the stand-in's punch) and
+   * on a defeat-triggered respawn; decremented every `update` (combat feel).
+   */
+  private playerInvulnTimer = 0;
 
   constructor(
     private readonly world: TileWorld,
@@ -272,6 +313,7 @@ export class BenchmarkSimulation {
     this.standInHpValue = combatModel.standIn.maxHp;
     this.standInDownedTimerValue = 0;
     this.houndAttackCooldownValues = this.houndConfigs.map(() => 0);
+    this.houndWindupTimer = this.houndConfigs.map(() => 0);
     this.recomputeTarget();
   }
 
@@ -360,6 +402,31 @@ export class BenchmarkSimulation {
    */
   get playerDefeatedThisFrame(): boolean {
     return this.playerDefeatedThisFramePulse;
+  }
+
+  /**
+   * True while the player is invulnerable ("i-frames") — set after taking
+   * damage or respawning; while true, no further hound bite / stand-in punch
+   * can reduce `playerHp` (GD-0007 combat feel).
+   */
+  get playerInvulnerable(): boolean {
+    return this.playerInvulnTimer > 0;
+  }
+
+  /**
+   * True for a hound currently winding up (telegraphing) a contact bite,
+   * index-stable with `hounds` (GD-0007 combat feel).
+   */
+  get houndWindingUp(): readonly boolean[] {
+    return this.houndWindupTimer.map((t) => t > 0);
+  }
+
+  /**
+   * True while the stand-in is winding up (telegraphing) its punch (GD-0007
+   * combat feel).
+   */
+  get standInWindingUp(): boolean {
+    return this.standInWindupTimer > 0;
   }
 
   /** Each hound's current HP, index-stable with `hounds` (GD-0007). */
@@ -492,29 +559,58 @@ export class BenchmarkSimulation {
     this.playerStruckThisFrame = false;
     this.playerDefeatedThisFramePulse = false;
 
-    // Task 4 / GD-0007: a hound that is NOT downed and in contact with the
-    // player bites on its own per-hound cooldown (never every frame). A downed
-    // hound is frozen (see the step loop above) and cannot bite. Nor can a
-    // hound already in terminal `flee` mode (defeated, fled the downed window)
-    // — it must not keep biting merely because it remains within contactRadius
+    // GD-0007 combat feel: the i-frame window decrements every frame; the bite
+    // and punch logic below gate their damage on the value AFTER this decrement,
+    // so a window set to `playerInvulnSeconds` lasts for exactly that long.
+    this.playerInvulnTimer = Math.max(0, this.playerInvulnTimer - dtSeconds);
+
+    // Task 4 / GD-0007 (+ combat-feel telegraph): a hound that is NOT downed
+    // and in contact with the player bites on its own per-hound cooldown
+    // (never every frame), and — once the cooldown is ready — winds up
+    // (telegraphs) for `hound.windupSeconds` before the bite actually resolves,
+    // so the player can read and react to the attack. A downed hound is frozen
+    // (see the step loop above) and cannot bite/wind up. Nor can a hound
+    // already in terminal `flee` mode (defeated, fled the downed window) — it
+    // must not keep biting merely because it remains within contactRadius
     // (e.g. cornered, or motionless in a speed-0 benchmark config): a
-    // defeated/fleeing entity deals no contact damage (GD-0007).
+    // defeated/fleeing entity deals no contact damage (GD-0007). Leaving
+    // contact (or fleeing) mid-wind-up cancels it outright.
+    const nextHoundWindupTimer = this.houndWindupTimer.slice();
     this.houndAttackCooldownValues = this.houndAttackCooldownValues.map((cooldown, i) => {
       if (this.houndDownedTimers[i] > 0) {
+        nextHoundWindupTimer[i] = 0;
         return cooldown;
       }
-      const nextCooldown = cooldown - dtSeconds;
-      if (
-        nextCooldown <= 0 &&
-        this.houndStates[i].mode !== 'flee' &&
-        houndInContact(this.houndStates[i], this.state.position, this.houndConfigs[i])
-      ) {
-        this.hunterHp -= this.combatModel.hound.contactDamage;
-        this.playerStruckThisFrame = true;
+      const inContact = houndInContact(this.houndStates[i], this.state.position, this.houndConfigs[i]);
+      if (this.houndStates[i].mode === 'flee' || !inContact) {
+        nextHoundWindupTimer[i] = 0; // left contact, or fled: cancel any wind-up
+        return Math.max(0, cooldown - dtSeconds);
+      }
+      if (nextHoundWindupTimer[i] > 0) {
+        // Already winding up: count it down and resolve the bite once it
+        // reaches 0 this frame.
+        nextHoundWindupTimer[i] = Math.max(0, nextHoundWindupTimer[i] - dtSeconds);
+        if (nextHoundWindupTimer[i] > 0) {
+          return cooldown;
+        }
+        // GD-0007 combat feel: the bite still resolves (resets the cooldown)
+        // even while the player is invulnerable — only the DAMAGE itself is
+        // i-frame-gated.
+        if (this.playerInvulnTimer <= 0) {
+          this.hunterHp -= this.combatModel.hound.contactDamage;
+          this.playerStruckThisFrame = true;
+          this.playerInvulnTimer = this.combatModel.playerInvulnSeconds;
+        }
         return this.combatModel.hound.contactCooldownSeconds;
+      }
+      // No wind-up running: once the cooldown is ready, start telegraphing.
+      const nextCooldown = cooldown - dtSeconds;
+      if (nextCooldown <= 0) {
+        nextHoundWindupTimer[i] = this.combatModel.hound.windupSeconds;
       }
       return nextCooldown;
     });
+    this.houndWindupTimer = nextHoundWindupTimer;
 
     // GD-0007: a downed stand-in (0 HP) is frozen — skip its movement/attack
     // entirely and count down to a respawn instead. When the timer runs out this
@@ -529,6 +625,7 @@ export class BenchmarkSimulation {
         this.pvpTimer = 0;
       }
       this.standInStruckThisFrame = false;
+      this.standInWindupTimer = 0; // frozen while downed: cancel any wind-up
     } else {
       // Stand-in "other player" Hunter (GD-0006 PvP test-bed stub, no damage
       // model on ITS punch — see Task 4): wanders when idle, chases/punches the
@@ -563,28 +660,43 @@ export class BenchmarkSimulation {
       }
 
       // Stand-in's punch (GD-0006 stub for ITS OWN visual/timer effect; Task 4 /
-      // GD-0007 adds real damage to the player). Off cooldown, while pvp is
-      // engaged and the stand-in is within its own attackRange of the player,
-      // it lands a punch: a one-frame pulse (`standInStruck`) plus a refresh of
-      // the mutual-combat timer, so the stand-in's own attacks keep the fight
-      // alive. The player's POSITION is never moved by this (only its HP).
+      // GD-0007 adds real damage to the player; combat-feel adds a telegraphed
+      // wind-up). Off cooldown, while pvp is engaged and the stand-in is within
+      // its own attackRange of the player, it first winds up for
+      // `standIn.windupSeconds`; on completion it lands the punch: a one-frame
+      // pulse (`standInStruck`) plus a refresh of the mutual-combat timer, so
+      // the stand-in's own attacks keep the fight alive. Leaving range (or pvp
+      // disengaging) mid-wind-up cancels it. The player's POSITION is never
+      // moved by this (only its HP).
       this.standInCooldown = Math.max(0, this.standInCooldown - dtSeconds);
-      if (this.otherHunterState && this.standInConfig && this.pvpEngaged && this.standInCooldown <= 0) {
+      this.standInStruckThisFrame = false;
+      if (this.otherHunterState && this.standInConfig && this.pvpEngaged) {
         const distance = length({
           x: this.otherHunterState.position.x - this.state.position.x,
           y: this.otherHunterState.position.y - this.state.position.y,
         });
-        if (distance <= this.standInConfig.attackRange) {
-          this.standInStruckThisFrame = true;
-          this.standInCooldown = this.standInConfig.attackCooldownSeconds;
-          this.pvpTimer = this.pvpCombatSeconds;
-          this.hunterHp -= this.combatModel.standIn.punchDamage;
-          this.playerStruckThisFrame = true;
-        } else {
-          this.standInStruckThisFrame = false;
+        const inRange = distance <= this.standInConfig.attackRange;
+        if (!inRange) {
+          this.standInWindupTimer = 0; // out of range: cancel any wind-up
+        } else if (this.standInWindupTimer > 0) {
+          this.standInWindupTimer = Math.max(0, this.standInWindupTimer - dtSeconds);
+          if (this.standInWindupTimer === 0) {
+            this.standInStruckThisFrame = true;
+            this.standInCooldown = this.standInConfig.attackCooldownSeconds;
+            this.pvpTimer = this.pvpCombatSeconds;
+            // GD-0007 combat feel: the punch still connects/refreshes pvp even
+            // while the player is invulnerable — only the DAMAGE is i-frame-gated.
+            if (this.playerInvulnTimer <= 0) {
+              this.hunterHp -= this.combatModel.standIn.punchDamage;
+              this.playerStruckThisFrame = true;
+              this.playerInvulnTimer = this.combatModel.playerInvulnSeconds;
+            }
+          }
+        } else if (this.standInCooldown <= 0) {
+          this.standInWindupTimer = this.combatModel.standIn.windupSeconds;
         }
       } else {
-        this.standInStruckThisFrame = false;
+        this.standInWindupTimer = 0; // not engaged (or no stand-in): cancel any wind-up
       }
     }
 
@@ -740,6 +852,10 @@ export class BenchmarkSimulation {
    */
   private respawnAfterDefeat(): void {
     this.resetCombatEntities();
+    // GD-0007 combat feel: unlike a fresh-encounter reset, a defeat-triggered
+    // respawn grants a brief invulnerability window so the player is not
+    // immediately re-struck upon reappearing.
+    this.playerInvulnTimer = this.combatModel.playerInvulnSeconds;
   }
 
   /**
@@ -761,8 +877,13 @@ export class BenchmarkSimulation {
     this.houndHpValues = this.houndConfigs.map(() => this.combatModel.hound.maxHp);
     this.houndDownedTimers = this.houndConfigs.map(() => 0);
     this.houndAttackCooldownValues = this.houndConfigs.map(() => 0);
+    this.houndWindupTimer = this.houndConfigs.map(() => 0);
+    this.standInWindupTimer = 0;
     this.standInHpValue = this.combatModel.standIn.maxHp;
     this.standInDownedTimerValue = 0;
+    // GD-0007 combat feel: a fresh encounter starts with no i-frame window;
+    // `respawnAfterDefeat` grants one explicitly AFTER calling this method.
+    this.playerInvulnTimer = 0;
     this.recomputeTarget();
   }
 

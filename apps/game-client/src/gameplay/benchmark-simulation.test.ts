@@ -28,8 +28,15 @@ const CONFIG: HunterSimConfig = {
 const COMBAT_MODEL: CombatModelConfig = {
   hunterMaxHp: 5,
   playerAttackDamage: 1,
-  hound: { maxHp: 2, contactDamage: 1, contactCooldownSeconds: 1.2, downedSeconds: 0.6 },
-  standIn: { maxHp: 3, punchDamage: 1, downedSeconds: 0.6 },
+  playerInvulnSeconds: 0.7,
+  hound: {
+    maxHp: 2,
+    contactDamage: 1,
+    contactCooldownSeconds: 1.2,
+    downedSeconds: 0.6,
+    windupSeconds: 0.35,
+  },
+  standIn: { maxHp: 3, punchDamage: 1, downedSeconds: 0.6, windupSeconds: 0.3 },
 };
 
 // An overgrowth obstruction just east of the open-world spawn (x=264): its left
@@ -666,7 +673,7 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(sim.standInStruck).toBe(false);
   });
 
-  it('punches the player once in range while engaged, refreshing the mutual-combat timer, without moving the player', () => {
+  it('punches the player once in range (after winding up) while engaged, refreshing the mutual-combat timer, without moving the player', () => {
     // Within the stand-in's own attackRange (40) even before it takes a step.
     const sim = withStandIn(vec2(264, 290));
     const playerBefore = sim.hunter.position;
@@ -674,8 +681,12 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(engage.hitOtherHunter).toBe(true);
     expect(sim.pvpEngaged).toBe(true);
 
-    sim.update(noActions, 1 / 60);
-    expect(sim.standInStruck).toBe(true);
+    let struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60);
+      struck = sim.standInStruck;
+    }
+    expect(struck).toBe(true);
     expect(sim.hunter.position).toEqual(playerBefore); // player never moved
     // The stand-in's own punch keeps the mutual-combat timer alive.
     sim.update(noActions, pvpCombatSeconds - 0.05);
@@ -685,8 +696,12 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
   it('does not punch again while its own cooldown is still active', () => {
     const sim = withStandIn(vec2(264, 290));
     sim.tryAttack();
-    sim.update(noActions, 1 / 60);
-    expect(sim.standInStruck).toBe(true);
+    let struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60);
+      struck = sim.standInStruck;
+    }
+    expect(struck).toBe(true);
     sim.update(noActions, 1 / 60); // well within attackCooldownSeconds (0.8)
     expect(sim.standInStruck).toBe(false);
   });
@@ -701,12 +716,17 @@ describe('BenchmarkSimulation — stand-in Hunter / mutual combat (GD-0006 PvP t
     expect(sim.standInStruck).toBe(false);
   });
 
-  it('reset zeroes the punch pulse and cooldown', () => {
+  it('reset zeroes the punch pulse, cooldown and wind-up', () => {
     const sim = withStandIn(vec2(264, 290));
     sim.tryAttack();
-    sim.update(noActions, 1 / 60);
-    expect(sim.standInStruck).toBe(true);
+    let struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60);
+      struck = sim.standInStruck;
+    }
+    expect(struck).toBe(true);
     sim.reset();
+    expect(sim.standInWindingUp).toBe(false);
     expect(sim.standInStruck).toBe(false);
   });
 });
@@ -745,21 +765,32 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp);
   });
 
-  it('a hound in contact damages the player on its cooldown, not every frame', () => {
+  it('a hound in contact damages the player on its cooldown (through a brief wind-up), not every frame', () => {
     const sim = withContactHound();
     const before = sim.playerHp;
 
-    sim.update(noActions, 0.05); // first contact bite
+    // First bite: telegraphs, then resolves (loop-until, robust to the exact
+    // number of frames the wind-up takes).
+    for (let i = 0; i < 200 && sim.playerHp === before; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
     expect(sim.inDanger).toBe(true); // sanity: contact is actually established
     expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
     expect(sim.playerStruck).toBe(true);
+    const afterFirst = sim.playerHp;
 
-    sim.update(noActions, 0.05); // still well within contactCooldownSeconds (1.2)
-    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage); // no 2nd bite
-    expect(sim.playerStruck).toBe(false);
+    // Well within the hound's own cooldown (1.2s) — no second bite yet, even
+    // though it may attempt further wind-ups.
+    for (let i = 0; i < 30; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.playerHp).toBe(afterFirst);
 
-    sim.update(noActions, COMBAT_MODEL.hound.contactCooldownSeconds); // cooldown elapses
-    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage * 2);
+    // Once the cooldown elapses, the next wind-up resolves into a bite.
+    for (let i = 0; i < 200 && sim.playerHp === afterFirst; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.playerHp).toBe(afterFirst - COMBAT_MODEL.hound.contactDamage);
     expect(sim.playerStruck).toBe(true);
   });
 
@@ -784,8 +815,13 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     );
     const before = sim.playerHp;
     sim.tryAttack(); // engages pvp
-    sim.update(noActions, 1 / 60); // stand-in punches back this frame
-    expect(sim.standInStruck).toBe(true);
+
+    let struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60); // wind-up, then the stand-in punches back
+      struck = sim.standInStruck;
+    }
+    expect(struck).toBe(true);
     expect(sim.playerHp).toBe(before - COMBAT_MODEL.standIn.punchDamage);
     expect(sim.playerStruck).toBe(true);
   });
@@ -813,11 +849,14 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     expect(sim.tryInteract()?.id).toBe('frag-near');
     expect(sim.collected).toEqual([{ id: 'frag-near', kind: 'fragment' }]);
 
-    // Each update's dt exceeds the contact cooldown, so every call lands a bite;
-    // hunterMaxHp (5) hits are enough to drive HP to 0 and trigger a respawn.
-    for (let i = 0; i < COMBAT_MODEL.hunterMaxHp; i += 1) {
-      sim.update(noActions, COMBAT_MODEL.hound.contactCooldownSeconds + 0.01);
+    // Small steps so each bite's wind-up plays out; hunterMaxHp (5) hits are
+    // enough to drive HP to 0 and trigger a respawn.
+    let defeated = false;
+    for (let i = 0; i < 2000 && !defeated; i += 1) {
+      sim.update(noActions, 1 / 60);
+      defeated = sim.playerDefeatedThisFrame;
     }
+    expect(defeated).toBe(true);
 
     expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp); // restored
     expect(sim.playerDefeatedThisFrame).toBe(true); // the respawn frame
@@ -833,20 +872,29 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     expect(sim.playerDefeatedThisFrame).toBe(false);
   });
 
-  it('reset reinitialises the hound attack cooldown and the struck pulse', () => {
+  it('reset reinitialises the hound attack cooldown, wind-up and the struck pulse', () => {
     const sim = withContactHound();
-    sim.update(noActions, 0.05); // lands a bite, starts the hound's cooldown
-    expect(sim.playerStruck).toBe(true);
+    let struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60); // wind-up, then lands a bite
+      struck = sim.playerStruck;
+    }
+    expect(struck).toBe(true);
     sim.reset();
     expect(sim.playerHp).toBe(COMBAT_MODEL.hunterMaxHp);
     expect(sim.playerStruck).toBe(false);
+    expect(sim.houndWindingUp[0]).toBe(false);
 
-    // A fresh cooldown (not still counting down from the pre-reset bite) — the
-    // very next contact frame bites immediately.
+    // A fresh cooldown AND wind-up (not still counting down from the
+    // pre-reset bite) — the hound telegraphs again from scratch, then lands.
     const before = sim.playerHp;
-    sim.update(noActions, 0.05);
+    struck = false;
+    for (let i = 0; i < 60 && !struck; i += 1) {
+      sim.update(noActions, 1 / 60);
+      struck = sim.playerStruck;
+    }
+    expect(struck).toBe(true);
     expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
-    expect(sim.playerStruck).toBe(true);
   });
 
   // Starts 10 units east of spawn (inside `minDistance` = footprintRadius(20) +
@@ -908,5 +956,225 @@ describe('BenchmarkSimulation — player HP / defeat & respawn (GD-0007)', () =>
     expect(sim.hounds[0]?.mode).toBe('flee');
     expect(sim.inDanger).toBe(true);
     expect(sim.playerHp).toBe(hpAtFlee); // a fleeing (defeated) hound must not bite
+  });
+});
+
+describe('BenchmarkSimulation — player i-frames (GD-0007 combat feel)', () => {
+  // A hound already touching the Hunter at spawn, on a deliberately fast
+  // contact cooldown — without i-frames it would bite on nearly every frame.
+  const fastContactHoundConfig = (spawn: Vec2): RuinHoundConfig => ({
+    speed: 0,
+    footprintRadius: 20,
+    waypoints: [spawn, spawn],
+    aggroRadius: 1000,
+    deAggroRadius: 2000,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+    fleeSpeedMultiplier: 1.4,
+  });
+
+  // The hound's own cooldown (0.05s) is far shorter than the i-frame window
+  // (0.5s), so any further HP loss within that window can only be explained by
+  // a missing i-frame gate, not by the hound's own pacing. A short wind-up
+  // (0.02s) keeps the telegraph in play without dominating the timing budget.
+  const GATING_COMBAT_MODEL: CombatModelConfig = {
+    hunterMaxHp: 10,
+    playerAttackDamage: 1,
+    playerInvulnSeconds: 0.5,
+    hound: { maxHp: 5, contactDamage: 1, contactCooldownSeconds: 0.05, downedSeconds: 0.6, windupSeconds: 0.02 },
+    standIn: { maxHp: 3, punchDamage: 1, downedSeconds: 0.6, windupSeconds: 0.02 },
+  };
+
+  it('is not invulnerable before anything has happened', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, GATING_COMBAT_MODEL);
+    expect(sim.playerInvulnerable).toBe(false);
+  });
+
+  it('a hound biting on a fast cooldown still lands only one hit per i-frame window', () => {
+    const world = openWorld();
+    const sim = new BenchmarkSimulation(world, CONFIG, GATING_COMBAT_MODEL, [], [
+      fastContactHoundConfig(world.spawn),
+    ]);
+    const before = sim.playerHp;
+
+    // Wait through the first wind-up/bite (loop-until, robust to the exact
+    // number of frames the telegraph takes).
+    for (let i = 0; i < 200 && sim.playerHp === before; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.playerHp).toBe(before - GATING_COMBAT_MODEL.hound.contactDamage);
+    expect(sim.playerInvulnerable).toBe(true);
+    const afterFirstHit = sim.playerHp;
+
+    // Well past several of the hound's fast wind-up/cooldown cycles, but
+    // still inside the (longer) i-frame window — no further HP loss.
+    for (let i = 0; i < 25; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.playerHp).toBe(afterFirstHit);
+
+    // Once the i-frame window elapses, the next wind-up that completes lands.
+    for (let i = 0; i < 200 && sim.playerHp === afterFirstHit; i += 1) {
+      sim.update(noActions, 1 / 60);
+    }
+    expect(sim.playerHp).toBe(afterFirstHit - GATING_COMBAT_MODEL.hound.contactDamage);
+  });
+
+  it('is briefly invulnerable immediately after a defeat-triggered respawn', () => {
+    const world = openWorld();
+    // Low max HP + a short i-frame window so the encounter (and the window
+    // under test) resolve in a small, deterministic number of frames.
+    const RESPAWN_COMBAT_MODEL: CombatModelConfig = {
+      hunterMaxHp: 2,
+      playerAttackDamage: 1,
+      playerInvulnSeconds: 0.1,
+      hound: { maxHp: 5, contactDamage: 1, contactCooldownSeconds: 0.05, downedSeconds: 0.6, windupSeconds: 0.02 },
+      standIn: { maxHp: 3, punchDamage: 1, downedSeconds: 0.6, windupSeconds: 0.02 },
+    };
+    const sim = new BenchmarkSimulation(world, CONFIG, RESPAWN_COMBAT_MODEL, [], [
+      fastContactHoundConfig(world.spawn),
+    ]);
+
+    let defeated = false;
+    for (let i = 0; i < 300 && !defeated; i += 1) {
+      sim.update(noActions, 1 / 60);
+      defeated = sim.playerDefeatedThisFrame;
+    }
+    expect(defeated).toBe(true);
+    expect(sim.playerHp).toBe(RESPAWN_COMBAT_MODEL.hunterMaxHp); // restored
+    expect(sim.playerInvulnerable).toBe(true); // briefly invulnerable right after respawn
+  });
+});
+
+describe('BenchmarkSimulation — enemy attack telegraph (GD-0007 combat feel)', () => {
+  const stationaryHoundConfig = (spawn: Vec2): RuinHoundConfig => ({
+    speed: 0,
+    footprintRadius: 20,
+    waypoints: [spawn, spawn],
+    aggroRadius: 1000,
+    deAggroRadius: 2000,
+    contactRadius: 40,
+    arriveEpsilon: 6,
+    fleeSpeedMultiplier: 1.4,
+  });
+
+  it('has no wind-up before anything has happened', () => {
+    const sim = new BenchmarkSimulation(openWorld(), CONFIG, COMBAT_MODEL, [], [stationaryHoundConfig(openWorld().spawn)]);
+    expect(sim.houndWindingUp).toEqual([false]);
+    expect(sim.standInWindingUp).toBe(false);
+  });
+
+  it('a hound in contact does not damage the player during its wind-up; damage lands only once it completes', () => {
+    const world = openWorld();
+    const sim = new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [stationaryHoundConfig(world.spawn)]);
+    const before = sim.playerHp;
+
+    sim.update(noActions, 1 / 60); // starts the wind-up (in contact, cooldown ready)
+    expect(sim.houndWindingUp[0]).toBe(true);
+    expect(sim.playerHp).toBe(before);
+    expect(sim.playerStruck).toBe(false);
+
+    // Advance almost the whole wind-up — still winding up, no damage yet.
+    sim.update(noActions, COMBAT_MODEL.hound.windupSeconds - 0.02);
+    expect(sim.houndWindingUp[0]).toBe(true);
+    expect(sim.playerHp).toBe(before);
+    expect(sim.playerStruck).toBe(false);
+
+    // The remaining sliver completes the wind-up and resolves the bite.
+    sim.update(noActions, 0.03);
+    expect(sim.houndWindingUp[0]).toBe(false);
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.hound.contactDamage);
+    expect(sim.playerStruck).toBe(true);
+  });
+
+  it('a hound that leaves contact mid-wind-up cancels it, dealing no bite', () => {
+    const world = openWorld();
+    // 26 units east of spawn — within contactRadius (40) so the wind-up starts,
+    // but close enough to the boundary that a few steps west breaks contact.
+    const nearHoundConfig: RuinHoundConfig = stationaryHoundConfig(vec2(world.spawn.x + 26, world.spawn.y));
+    const sim = new BenchmarkSimulation(world, CONFIG, COMBAT_MODEL, [], [nearHoundConfig]);
+    const before = sim.playerHp;
+
+    sim.update(noActions, 1 / 60); // starts the wind-up (in contact, cooldown ready)
+    expect(sim.houndWindingUp[0]).toBe(true);
+
+    // Step the Hunter away, out of contact, before the wind-up completes.
+    for (let i = 0; i < 12 && sim.inDanger; i += 1) {
+      sim.update(set('move-west'), 1 / 60);
+    }
+    expect(sim.inDanger).toBe(false);
+    expect(sim.houndWindingUp[0]).toBe(false); // cancelled by leaving contact
+
+    // Wait out well past the (cancelled) wind-up window — no bite lands.
+    sim.update(noActions, COMBAT_MODEL.hound.windupSeconds + 0.5);
+    expect(sim.playerHp).toBe(before);
+    expect(sim.houndWindingUp[0]).toBe(false);
+  });
+
+  const stationaryStandInConfig: StandInSimConfig = {
+    speed: 0,
+    footprintRadius: 16,
+    wanderTurnRate: 0.8,
+    combatSpeedMultiplier: 1.0,
+    attackRange: 40,
+    attackCooldownSeconds: 0.8,
+  };
+
+  it('the stand-in does not damage the player during its wind-up; damage lands only once it completes', () => {
+    const sim = new BenchmarkSimulation(
+      openWorld(),
+      CONFIG,
+      COMBAT_MODEL,
+      [],
+      [],
+      stationaryStandInConfig,
+      vec2(264, 290), // within its own attackRange (40) before it even steps
+      3,
+    );
+    const before = sim.playerHp;
+    sim.tryAttack(); // engages pvp
+
+    sim.update(noActions, 1 / 60); // starts the wind-up (in range, cooldown ready)
+    expect(sim.standInWindingUp).toBe(true);
+    expect(sim.playerHp).toBe(before);
+    expect(sim.standInStruck).toBe(false);
+
+    sim.update(noActions, COMBAT_MODEL.standIn.windupSeconds - 0.02);
+    expect(sim.standInWindingUp).toBe(true);
+    expect(sim.playerHp).toBe(before);
+
+    sim.update(noActions, 0.03);
+    expect(sim.standInWindingUp).toBe(false);
+    expect(sim.playerHp).toBe(before - COMBAT_MODEL.standIn.punchDamage);
+    expect(sim.standInStruck).toBe(true);
+  });
+
+  it('the stand-in cancels its wind-up if the player leaves its attack range before it completes', () => {
+    const sim = new BenchmarkSimulation(
+      openWorld(),
+      CONFIG,
+      COMBAT_MODEL,
+      [],
+      [],
+      stationaryStandInConfig,
+      vec2(264, 290), // distance 26, within attackRange (40)
+      3,
+    );
+    const before = sim.playerHp;
+    sim.tryAttack(); // engages pvp
+    sim.update(noActions, 1 / 60); // starts the wind-up
+    expect(sim.standInWindingUp).toBe(true);
+
+    // Step the Hunter north, away from the (stationary) stand-in, before the
+    // wind-up completes.
+    for (let i = 0; i < 20 && sim.standInWindingUp; i += 1) {
+      sim.update(set('move-north'), 1 / 60);
+    }
+    expect(sim.standInWindingUp).toBe(false); // cancelled by leaving range
+
+    // Wait out well past the (cancelled) wind-up window — no punch lands.
+    sim.update(noActions, COMBAT_MODEL.standIn.windupSeconds + 0.5);
+    expect(sim.playerHp).toBe(before);
+    expect(sim.standInStruck).toBe(false);
   });
 });

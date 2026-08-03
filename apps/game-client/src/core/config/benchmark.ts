@@ -154,6 +154,12 @@ export const BENCHMARK = {
     hunterMaxHp: 5,
     /** Damage the player's axe/punch deals per connecting hit. */
     playerAttackDamage: 1,
+    /**
+     * Seconds of player invulnerability ("i-frames") after taking ANY damage
+     * (a hound bite or the stand-in's punch) and after a defeat-triggered
+     * respawn (GD-0007 combat feel — provisional tuning, not approved balance).
+     */
+    playerInvulnSeconds: 0.7,
     hound: {
       /** Hound HP (was the `hitsToRepel` repel stub). */
       maxHp: 2,
@@ -163,6 +169,11 @@ export const BENCHMARK = {
       contactCooldownSeconds: 1.2,
       /** Seconds a hound stays "downed" (frozen) before it flees/vanishes. */
       downedSeconds: 0.6,
+      /**
+       * Seconds a hound "winds up" (telegraphs) before a contact bite resolves
+       * (GD-0007 combat feel), so the player can read and react to the attack.
+       */
+      windupSeconds: 0.35,
     },
     standIn: {
       /** Stand-in Hunter HP. */
@@ -171,6 +182,11 @@ export const BENCHMARK = {
       punchDamage: 1,
       /** Seconds the stand-in stays "downed" before it recedes/resets. */
       downedSeconds: 0.6,
+      /**
+       * Seconds the stand-in "winds up" (telegraphs) before its punch resolves
+       * (GD-0007 combat feel), mirroring the hound's `windupSeconds`.
+       */
+      windupSeconds: 0.3,
     },
   },
 
