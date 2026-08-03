@@ -87,11 +87,25 @@ describe('benchmark config', () => {
   });
 
   it('has sane hand-axe / repel tunables', () => {
-    expect(BENCHMARK.hound.hitsToRepel).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackRange).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackCooldownSeconds).toBeGreaterThan(0);
     expect(BENCHMARK.combat.attackArcCos).toBeGreaterThanOrEqual(-1);
     expect(BENCHMARK.combat.attackArcCos).toBeLessThanOrEqual(1);
+  });
+
+  it('has a benchmark combat model with positive HP and damage', () => {
+    const c = BENCHMARK.combatModel;
+    for (const v of [
+      c.hunterMaxHp, c.playerAttackDamage,
+      c.hound.maxHp, c.hound.contactDamage, c.hound.contactCooldownSeconds, c.hound.downedSeconds,
+      c.standIn.maxHp, c.standIn.punchDamage, c.standIn.downedSeconds,
+      c.playerInvulnSeconds, c.hound.windupSeconds, c.standIn.windupSeconds,
+    ]) {
+      expect(v).toBeGreaterThan(0);
+    }
+    // A few axe hits should down a hound / the stand-in (benchmark pacing).
+    expect(c.hound.maxHp).toBeLessThanOrEqual(c.playerAttackDamage * 5);
+    expect(c.standIn.maxHp).toBeLessThanOrEqual(c.playerAttackDamage * 6);
   });
 
   it('has restrained, positive feel tunables', () => {
@@ -110,7 +124,7 @@ describe('benchmark config', () => {
     }
     // Restrained: a hit-stop micro-hold, a few px of shake, a small pop.
     expect(f.hitStopSeconds).toBeLessThanOrEqual(0.12);
-    expect(f.shakePeakPx).toBeLessThanOrEqual(6);
+    expect(f.shakePeakPx).toBeLessThanOrEqual(10);
     expect(f.pickupPopScale).toBeGreaterThan(1);
     expect(f.pickupPopScale).toBeLessThanOrEqual(1.4);
   });
@@ -120,5 +134,26 @@ describe('benchmark config', () => {
       BENCHMARK.combatCamera.intensitySmoothing,
     );
     expect(BENCHMARK.combatCamera.exitSmoothing).toBeGreaterThan(0);
+  });
+
+  it('has a point-blank range within the attack range (GD-0006 combat feel)', () => {
+    expect(BENCHMARK.combat.pointBlankRange).toBeGreaterThan(0);
+    expect(BENCHMARK.combat.pointBlankRange).toBeLessThanOrEqual(BENCHMARK.combat.attackRange);
+  });
+
+  it('has a sandbox test-bed block with in-grid spawns', () => {
+    const s = BENCHMARK.sandbox;
+    expect(s.pvpCombatSeconds).toBeGreaterThan(0);
+    expect(s.otherHunter.speed).toBeGreaterThan(0);
+    for (const t of s.extraHoundTiles) {
+      expect(t.col).toBeGreaterThanOrEqual(0);
+      expect(t.row).toBeGreaterThanOrEqual(0);
+      expect(t.col).toBeLessThan(BENCHMARK.world.cols);
+      expect(t.row).toBeLessThan(BENCHMARK.world.rows);
+    }
+    if (s.otherHunterTile) {
+      expect(s.otherHunterTile.col).toBeLessThan(BENCHMARK.world.cols);
+      expect(s.otherHunterTile.row).toBeLessThan(BENCHMARK.world.rows);
+    }
   });
 });

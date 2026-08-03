@@ -26,8 +26,6 @@ export interface HoundState {
   readonly mode: HoundMode;
   /** Patrol waypoint the hound is currently heading toward. */
   readonly waypointIndex: number;
-  /** Successful axe hits taken this encounter; at `hitsToRepel` the hound flees. */
-  readonly hits: number;
 }
 
 /** Benchmark-only tunables (temporary values; see core/config/benchmark.ts). */
@@ -46,8 +44,6 @@ export interface RuinHoundConfig {
   readonly contactRadius: number;
   /** How close (world px) counts as having reached a waypoint/home. */
   readonly arriveEpsilon: number;
-  /** Successful axe hits needed to drive the hound off (benchmark stub). */
-  readonly hitsToRepel: number;
   /** Speed multiplier while fleeing; defaults to 1.3 when omitted. */
   readonly fleeSpeedMultiplier?: number;
 }
@@ -62,7 +58,6 @@ export function createHoundState(config: RuinHoundConfig): HoundState {
     facing: DEFAULT_FACING,
     mode: 'patrol',
     waypointIndex: config.waypoints.length > 1 ? 1 : 0,
-    hits: 0,
   };
 }
 
@@ -72,20 +67,21 @@ export function houndInContact(state: HoundState, hunterPos: Vec2, config: RuinH
 }
 
 /**
- * Records a successful axe hit. Counts the hit and, once `hitsToRepel` is reached,
- * flips the hound to the terminal `flee` mode (a benchmark stub for
- * "incapacitate/flee" — no health or damage model). Pure.
+ * Marks a hound as defeated: it enters the terminal `flee` mode and runs off
+ * (the benchmark's "downed → vanish", GD-0007). The caller (sim) decides WHEN a
+ * hound is defeated, from HP. Pure.
  */
-export function registerHoundHit(state: HoundState, config: RuinHoundConfig): HoundState {
-  const hits = state.hits + 1;
-  const mode: HoundMode = hits >= config.hitsToRepel ? 'flee' : state.mode;
-  return { ...state, hits, mode };
+export function defeatHound(state: HoundState): HoundState {
+  return { ...state, mode: 'flee' };
 }
 
 /**
  * True when the hound is within `range` and inside the Hunter's facing arc
  * (`arcCos` is the cosine of the half-arc; e.g. 0.5 ≈ a 120° cone). `facingVec`
- * must be unit-length. A hound on top of the Hunter always connects.
+ * must be unit-length. A hound on top of the Hunter always connects. Within
+ * `pointBlankRange` (default 0, i.e. disabled) the hound connects regardless of
+ * facing — a soft tolerance for the case where the Hunter and hound are pressed
+ * together during combat (GD-0006).
  */
 export function houndInAttackReach(
   state: HoundState,
@@ -93,17 +89,73 @@ export function houndInAttackReach(
   facingVec: Vec2,
   range: number,
   arcCos: number,
+  pointBlankRange = 0,
 ): boolean {
   const to = { x: state.position.x - hunterPos.x, y: state.position.y - hunterPos.y };
   const dist = length(to);
   if (dist > range) {
     return false;
   }
-  if (dist < 1e-6) {
+  if (dist <= pointBlankRange || dist < 1e-6) {
     return true;
   }
   const dir = normalize(to);
   return dir.x * facingVec.x + dir.y * facingVec.y >= arcCos;
+}
+
+/**
+ * Circumstantial combat collision (GD-0006): resolve a hound overlapping the Hunter
+ * to a soft, non-stacking standoff. Returns the hound position pushed OUT to
+ * `minDistance` from the Hunter along the current separation direction; a hound
+ * already at/beyond `minDistance` is returned unchanged (only pushes out, never in).
+ * Pure. The caller decides when this applies (only while in combat) and re-resolves
+ * the result against world solids.
+ */
+export function combatSeparation(houndPos: Vec2, hunterPos: Vec2, minDistance: number): Vec2 {
+  const away = { x: houndPos.x - hunterPos.x, y: houndPos.y - hunterPos.y };
+  const d = length(away);
+  if (d >= minDistance) {
+    return houndPos;
+  }
+  if (d < 1e-6) {
+    return { x: hunterPos.x + minDistance, y: hunterPos.y };
+  }
+  const scale = minDistance / d;
+  return { x: hunterPos.x + away.x * scale, y: hunterPos.y + away.y * scale };
+}
+
+/**
+ * Symmetric soft push-apart for two engaged bodies (GD-0006 creature↔creature): each
+ * is moved half the overlap along their shared centre line, so neither acts as a hard
+ * wall and the outcome is order-independent. A pair already at/beyond `minDistance` is
+ * returned unchanged (same references). Pure; caller re-resolves against world solids.
+ */
+export function separatePairSymmetric(a: Vec2, b: Vec2, minDistance: number): [Vec2, Vec2] {
+  const delta = { x: a.x - b.x, y: a.y - b.y };
+  const d = length(delta);
+  if (d >= minDistance) {
+    return [a, b];
+  }
+  const dir = d < 1e-6 ? { x: 1, y: 0 } : normalize(delta);
+  const push = (minDistance - d) / 2;
+  return [
+    { x: a.x + dir.x * push, y: a.y + dir.y * push },
+    { x: b.x - dir.x * push, y: b.y - dir.y * push },
+  ];
+}
+
+/** The nearest point in `points` to `from`, or null when `points` is empty. Pure. */
+export function nearestOf(from: Vec2, points: readonly Vec2[]): Vec2 | null {
+  let best: Vec2 | null = null;
+  let bestD = Infinity;
+  for (const p of points) {
+    const d = (p.x - from.x) ** 2 + (p.y - from.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
 }
 
 /**
@@ -177,7 +229,6 @@ export function stepHound(
     facing: directionFromVector(intent, state.facing),
     mode,
     waypointIndex,
-    hits: state.hits,
   };
 }
 

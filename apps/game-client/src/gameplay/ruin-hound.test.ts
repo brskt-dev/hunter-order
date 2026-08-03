@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  combatSeparation,
   createHoundState,
+  defeatHound,
   houndInAttackReach,
   houndInContact,
   type HoundState,
-  registerHoundHit,
+  nearestOf,
   type RuinHoundConfig,
+  separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
 import { length, vec2 } from './vec2';
@@ -21,7 +24,6 @@ const CONFIG: RuinHoundConfig = {
   deAggroRadius: 200,
   contactRadius: 30,
   arriveEpsilon: 4,
-  hitsToRepel: 2,
 };
 
 // Same behaviour but with a huge aggro radius, so the hound chases across the whole
@@ -50,7 +52,6 @@ describe('createHoundState', () => {
     expect(s.position).toEqual({ x: 200, y: 200 });
     expect(s.mode).toBe('patrol');
     expect(s.waypointIndex).toBe(1);
-    expect(s.hits).toBe(0);
   });
 });
 
@@ -158,26 +159,10 @@ describe('houndInContact', () => {
   });
 });
 
-describe('registerHoundHit', () => {
-  it('counts hits but stays engaged until the repel threshold', () => {
-    const chasing: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
-    const once = registerHoundHit(chasing, CONFIG); // hitsToRepel = 2
-    expect(once.hits).toBe(1);
-    expect(once.mode).toBe('chase');
-  });
-
-  it('flees once hits reach the repel threshold', () => {
-    const hurt: HoundState = { ...createHoundState(CONFIG), mode: 'chase', hits: 1 };
-    const repelled = registerHoundHit(hurt, CONFIG);
-    expect(repelled.hits).toBe(2);
-    expect(repelled.mode).toBe('flee');
-  });
-
-  it('does not mutate the input state', () => {
-    const s: HoundState = { ...createHoundState(CONFIG), mode: 'chase' };
-    registerHoundHit(s, CONFIG);
-    expect(s.hits).toBe(0);
-    expect(s.mode).toBe('chase');
+describe('defeatHound', () => {
+  it('sends the hound into terminal flee', () => {
+    const s = createHoundState(CONFIG);
+    expect(defeatHound({ ...s, mode: 'chase' }).mode).toBe('flee');
   });
 });
 
@@ -215,5 +200,70 @@ describe('houndInAttackReach', () => {
   it('misses a hound out of range', () => {
     const s: HoundState = { ...createHoundState(CONFIG), position: vec2(300, 200) }; // dist 100 > 52
     expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
+  });
+
+  it('connects at point-blank regardless of facing', () => {
+    // 10px WEST of (behind) the hunter, who faces east.
+    const s: HoundState = { ...createHoundState(CONFIG), position: vec2(190, 200) };
+    // Behind the Hunter and outside the facing arc: misses without point-blank.
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5)).toBe(false);
+    // Within a 30px point-blank range, it connects regardless of facing.
+    expect(houndInAttackReach(s, hunter, east, 52, 0.5, 30)).toBe(true);
+  });
+});
+
+describe('combatSeparation', () => {
+  const hunter = vec2(100, 100);
+
+  it('leaves a hound that is already clear untouched', () => {
+    const pos = vec2(100, 160); // 60 away
+    expect(combatSeparation(pos, hunter, 36)).toBe(pos);
+  });
+
+  it('pushes an overlapping hound out to exactly minDistance along the away direction', () => {
+    const pos = vec2(110, 100); // 10 away, east
+    const out = combatSeparation(pos, hunter, 36);
+    expect(out.x).toBeCloseTo(136, 5);
+    expect(out.y).toBeCloseTo(100, 5);
+  });
+
+  it('resolves a hound coincident with the Hunter to a deterministic standoff', () => {
+    const out = combatSeparation(vec2(100, 100), hunter, 36);
+    expect(Math.hypot(out.x - hunter.x, out.y - hunter.y)).toBeCloseTo(36, 5);
+  });
+});
+
+describe('separatePairSymmetric', () => {
+  it('leaves a clear pair untouched (same references)', () => {
+    const a = { x: 0, y: 0 };
+    const b = { x: 50, y: 0 };
+    const [ra, rb] = separatePairSymmetric(a, b, 36);
+    expect(ra).toBe(a);
+    expect(rb).toBe(b);
+  });
+
+  it('pushes an overlapping pair apart to exactly minDistance, symmetrically', () => {
+    const a = { x: 10, y: 0 };
+    const b = { x: 20, y: 0 }; // 10 apart along +x
+    const [ra, rb] = separatePairSymmetric(a, b, 36);
+    expect(Math.hypot(ra.x - rb.x, ra.y - rb.y)).toBeCloseTo(36, 5);
+    // symmetric: each moved 13 (half of 26 overlap); a goes -x, b goes +x
+    expect(ra.x).toBeCloseTo(-3, 5);
+    expect(rb.x).toBeCloseTo(33, 5);
+  });
+
+  it('resolves a coincident pair deterministically along +x', () => {
+    const [ra, rb] = separatePairSymmetric({ x: 5, y: 5 }, { x: 5, y: 5 }, 36);
+    expect(Math.hypot(ra.x - rb.x, ra.y - rb.y)).toBeCloseTo(36, 5);
+  });
+});
+
+describe('nearestOf', () => {
+  it('returns null for an empty list', () => {
+    expect(nearestOf({ x: 0, y: 0 }, [])).toBeNull();
+  });
+  it('returns the nearest point', () => {
+    const near = { x: 1, y: 0 };
+    expect(nearestOf({ x: 0, y: 0 }, [{ x: 10, y: 0 }, near, { x: 5, y: 5 }])).toBe(near);
   });
 });

@@ -121,8 +121,6 @@ export const BENCHMARK = {
     deAggroRadius: 340,
     contactRadius: 40,
     arriveEpsilon: 6,
-    /** Axe hits to drive it off (benchmark stub — no health/damage model). */
-    hitsToRepel: 2,
     /** Runs away faster than it chased. */
     fleeSpeedMultiplier: 1.4,
   },
@@ -137,6 +135,59 @@ export const BENCHMARK = {
     /** Cosine of the attack half-arc: 0.5 ≈ a 120° cone. */
     attackArcCos: 0.5,
     attackCooldownSeconds: 0.35,
+    /**
+     * Point-blank reach (world px): a hound this close connects regardless of the
+     * Hunter's facing — forgiving when the creature is right on top of you
+     * (GD-0006 combat feel). Smaller than the biting-distance standoff, so at normal
+     * range the facing arc still gates the hit.
+     */
+    pointBlankRange: 30,
+  },
+
+  /**
+   * Benchmark combat model (GD-0007 — BENCHMARK-ONLY, non-authoritative). HP,
+   * fixed per-hit damage, and brief "downed" durations. Provisional tuning, NOT
+   * approved balance; the server-authoritative model is future work.
+   */
+  combatModel: {
+    /** Player Hunter max HP. */
+    hunterMaxHp: 5,
+    /** Damage the player's axe/punch deals per connecting hit. */
+    playerAttackDamage: 1,
+    /**
+     * Seconds of player invulnerability ("i-frames") after taking ANY damage
+     * (a hound bite or the stand-in's punch) and after a defeat-triggered
+     * respawn (GD-0007 combat feel — provisional tuning, not approved balance).
+     */
+    playerInvulnSeconds: 0.7,
+    hound: {
+      /** Hound HP (was the `hitsToRepel` repel stub). */
+      maxHp: 2,
+      /** Damage a hound deals to the player per contact bite. */
+      contactDamage: 1,
+      /** Seconds between a hound's contact bites. */
+      contactCooldownSeconds: 1.2,
+      /** Seconds a hound stays "downed" (frozen) before it flees/vanishes. */
+      downedSeconds: 0.6,
+      /**
+       * Seconds a hound "winds up" (telegraphs) before a contact bite resolves
+       * (GD-0007 combat feel), so the player can read and react to the attack.
+       */
+      windupSeconds: 0.35,
+    },
+    standIn: {
+      /** Stand-in Hunter HP. */
+      maxHp: 3,
+      /** Damage the stand-in's punch deals to the player. */
+      punchDamage: 1,
+      /** Seconds the stand-in stays "downed" before it recedes/resets. */
+      downedSeconds: 0.6,
+      /**
+       * Seconds the stand-in "winds up" (telegraphs) before its punch resolves
+       * (GD-0007 combat feel), mirroring the hound's `windupSeconds`.
+       */
+      windupSeconds: 0.3,
+    },
   },
 
   /**
@@ -153,7 +204,7 @@ export const BENCHMARK = {
     /** Engagement smoothing rate (per second); drives zoom + look-ahead + danger. */
     intensitySmoothing: 4,
     /** Engage eases in at `intensitySmoothing`; disengage eases out gentler. */
-    exitSmoothing: 2.5,
+    exitSmoothing: 1.6,
   },
 
   /**
@@ -164,23 +215,56 @@ export const BENCHMARK = {
    */
   feel: {
     /** Visual micro-hold on the hound at impact (seconds). */
-    hitStopSeconds: 0.05,
-    /** Max camera render offset at full shake (world px). Small on purpose. */
-    shakePeakPx: 3,
+    hitStopSeconds: 0.09,
+    /** Max camera render offset at full shake (world px). Kept small/bounded. */
+    shakePeakPx: 8,
     /** Exponential decay rate of the shake envelope (per second). */
-    shakeDecayRate: 9,
+    shakeDecayRate: 7,
     /** Oscillation frequency of the shake offset (rad/s-ish). */
-    shakeFrequency: 60,
+    shakeFrequency: 55,
     /** Exponential decay rate of the impact-flash envelope (per second). */
-    flashDecayRate: 8,
+    flashDecayRate: 6,
     /** Max hound VISUAL recoil offset (world px) — never the logical position. */
-    recoilPeakPx: 6,
+    recoilPeakPx: 16,
     /** Exponential decay rate of the recoil envelope (per second). */
-    recoilDecayRate: 12,
+    recoilDecayRate: 9,
     /** Fragment pickup pop peak scale. */
-    pickupPopScale: 1.15,
+    pickupPopScale: 1.3,
     /** Fragment pickup pop + fade duration (ms). */
-    pickupPopMs: 180,
+    pickupPopMs: 240,
+  },
+
+  /**
+   * Combat test-bed (BENCHMARK TEST-ONLY, non-authoritative). Populated lists turn
+   * the scene into a combat sandbox: a small pack of extra ruin hounds and a second
+   * "stand-in player" Hunter with simple AI, to exercise the GD-0006 collision model
+   * (creature↔Hunter, creature↔creature, Hunter↔Hunter in combat) and multi-target
+   * combat. Empty lists / null → the original 1-Hunter/1-hound first-playable-loop.
+   * Not part of the approved benchmark composition — a test fixture.
+   */
+  sandbox: {
+    /** Extra ruin hounds (besides BENCHMARK.hound), spawned at these tiles. */
+    extraHoundTiles: [
+      { col: 24, row: 24 },
+      { col: 22, row: 26 },
+    ],
+    /** The stand-in Hunter's spawn tile (null → no second Hunter). */
+    otherHunterTile: { col: 12, row: 12 },
+    /** Seconds a mutual-combat timer stays active after attacking the stand-in Hunter. */
+    pvpCombatSeconds: 3,
+    /** Simple-AI stand-in Hunter tunables. */
+    otherHunter: {
+      speed: 120,
+      footprintRadius: Math.round(0.33 * 48),
+      /** Radians/sec the wander heading rotates (deterministic wander). */
+      wanderTurnRate: 0.8,
+      /** Speed multiplier while chasing the player during mutual combat. */
+      combatSpeedMultiplier: 1.0,
+      /** Melee reach (world px) of the stand-in's punch (GD-0006 stub — no damage model). */
+      attackRange: 40,
+      /** Minimum time (seconds) between the stand-in's punches. */
+      attackCooldownSeconds: 0.8,
+    },
   },
 
   /**
@@ -229,6 +313,16 @@ export const BENCHMARK = {
     // Axe swing arc + the flash when a hit lands on the hound.
     attack: 0xf0ead6,
     hitFlash: 0xffe8a3,
+    // Combat-sandbox stand-in "other player" Hunter (GD-0006 test-bed): a cooler,
+    // distinct tone so it's never mistaken for the real Hunter at a glance.
+    otherHunter: 0x9aa8c0,
+    otherHunterFacing: 0x2c333f,
+    // PvP combat indicator (GD-0006 test-bed): a restrained accent for the ring +
+    // "EM COMBATE" label shown above the stand-in only while mutual combat is active.
+    combatMarker: 0xe0a34a,
+    // Enemy attack telegraph (GD-0007 combat feel): a warning-warm tint/pulse on
+    // a hound/stand-in while it winds up a bite/punch, distinct from `hitFlash`.
+    telegraph: 0xff9d3d,
     // Oblique walls: lit top face + shaded front face + dark top edge.
     wallTop: 0x8a8690,
     wallFront: 0x4c4a52,
@@ -237,5 +331,14 @@ export const BENCHMARK = {
     groundAlt: 0x35422f,
     dirt: 0x4a3f30,
     prompt: 0xf4f4ec,
+    // Restrained over-head/HUD HP bar (GD-0007): a dark back plate + a fill that
+    // dips to `hpBarLow` under a third HP. Never shown as an always-on MMO bar —
+    // the scene gates visibility to combat/damaged states.
+    hpBarBack: 0x1c1f1a,
+    hpBarFill: 0x7fbf6a,
+    hpBarLow: 0xc1503f,
+    // Brief, restrained screen flash on a defeat-triggered respawn (GD-0007) —
+    // a pale tone (matches `prompt`), not an alarming full-red flash.
+    respawnFlash: 0xf4f4ec,
   },
 } as const;

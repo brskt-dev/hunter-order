@@ -7,6 +7,7 @@ export {
   type AttackResult,
   BenchmarkSimulation,
   type CollectedItem,
+  type CombatModelConfig,
   type HunterSimConfig,
   type HunterState,
   stepHunter,
@@ -37,16 +38,25 @@ export { clampDeltaSeconds, stepPosition } from './movement';
 export type { MovementAction } from './movement-intent';
 export { intentFromActions } from './movement-intent';
 export {
+  combatSeparation,
   createHoundState,
+  defeatHound,
   houndInAttackReach,
   houndInContact,
   type HoundMode,
   type HoundState,
-  registerHoundHit,
+  nearestOf,
   type RuinHoundConfig,
+  separatePairSymmetric,
   stepHound,
 } from './ruin-hound';
-export { directionalFrameKey, pixelLabCardinal } from './sprite-directions';
+export { directionalFrameKey, nearestCoveredDirection, pixelLabCardinal } from './sprite-directions';
+export {
+  createStandInHunter,
+  type StandInHunterConfig,
+  type StandInHunterState,
+  stepStandInHunter,
+} from './stand-in-hunter';
 export type { Vec2 } from './vec2';
 export { add, length, lerp, normalize, scale, vec2, ZERO } from './vec2';
 export type { TileRect, TileWorld, TileWorldSpec } from './world';
