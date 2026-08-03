@@ -320,6 +320,9 @@ export const BENCHMARK = {
     // PvP combat indicator (GD-0006 test-bed): a restrained accent for the ring +
     // "EM COMBATE" label shown above the stand-in only while mutual combat is active.
     combatMarker: 0xe0a34a,
+    // Enemy attack telegraph (GD-0007 combat feel): a warning-warm tint/pulse on
+    // a hound/stand-in while it winds up a bite/punch, distinct from `hitFlash`.
+    telegraph: 0xff9d3d,
     // Oblique walls: lit top face + shaded front face + dark top edge.
     wallTop: 0x8a8690,
     wallFront: 0x4c4a52,

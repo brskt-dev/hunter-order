@@ -131,6 +131,28 @@ const RESPAWN_FLASH_MS = 450;
 // Peak alpha of the respawn flash (restrained, not a full whiteout).
 const RESPAWN_FLASH_ALPHA = 0.5;
 
+// Player take-hit weight (GD-0007 combat feel): the player's own screen-shake
+// reuses `BENCHMARK.feel`'s shake envelope (on a separate `playerImpact` so it
+// never fights the hound-hit envelope), scaled down a touch so a hit TAKEN
+// reads lighter than a hit LANDED.
+const PLAYER_HIT_SHAKE_SCALE = 0.6;
+
+// i-frame blink (GD-0007 combat feel): a cheap periodic alpha flicker on the
+// Hunter while `sim.playerInvulnerable`, restored to full alpha the instant
+// it ends.
+const INVULN_BLINK_INTERVAL_MS = 90;
+const INVULN_BLINK_ALPHA = 0.35;
+
+// Enemy attack telegraph tell (GD-0007 combat feel): a restrained scale pulse
+// (+ tint on real art) shown on a hound/stand-in only while it is winding up.
+const TELEGRAPH_SCALE_PEAK = 0.12;
+const TELEGRAPH_PULSE_FREQUENCY = 14;
+
+// Punch connect-sync (GD-0007 combat feel): the player's punch animation has
+// `PUNCH_FRAME_COUNT` (6) frames; the fist visually lands around the 3rd —
+// `Phaser.Animations.AnimationFrame#index` is 1-based, so this is that frame.
+const PUNCH_CONNECT_FRAME_INDEX = 3;
+
 // Scalar frame-rate-independent smoothing toward a target (companion to the
 // Vec2 `smoothTowards`): the same 1 - e^(-rate*dt) curve.
 const approach = (current: number, target: number, rate: number, dt: number): number =>
@@ -184,6 +206,9 @@ interface StandInView {
   /** Over-head HP bar (GD-0007): back plate + fill, mirrors `HoundView`. */
   hpBarBack: Phaser.GameObjects.Rectangle;
   hpBarFill: Phaser.GameObjects.Rectangle;
+  /** Envelope-driven hit flash (GD-0007), mirrors `HoundView.flash` — shown when
+   * the player's swing connects with the stand-in instead of a hound. */
+  flash?: Phaser.GameObjects.Ellipse;
 }
 
 /** The PvP "EM COMBATE" indicator (ring + label) that floats above the stand-in
@@ -245,6 +270,24 @@ export class BenchmarkScene extends BaseScene {
   private impact: ImpactFeel = zeroImpact();
   private recoilDir: Vec2 = ZERO;
   private shakeClock = 0;
+  /** Take-hit weight envelope for the PLAYER (GD-0007): a separate `ImpactFeel`
+   * from `impact` (the player's own punch landing on a target) so the two
+   * never fight each other's decay. Drives a light camera-shake add-on + a
+   * micro hit-stop hold on the Hunter sprite; never moves logical position. */
+  private playerImpact: ImpactFeel = zeroImpact();
+  /** Take-hit envelope for the STAND-IN (GD-0007): mirrors the hound's
+   * recoil/flash/hit-stop idiom (`impact`/`recoilDir`/`recoilHoundIndex`) but
+   * on its own state, since there's only ever one stand-in. */
+  private standInImpact: ImpactFeel = zeroImpact();
+  private standInRecoilDir: Vec2 = ZERO;
+  /**
+   * The visual impact (target flash + camera shake) a connecting swing owes,
+   * held until the player's punch animation reaches its connect frame
+   * (`PUNCH_CONNECT_FRAME_INDEX`) — GD-0007 punch connect-sync. Null when no
+   * impact is owed. Fired immediately instead (no defer) when the punch
+   * animation isn't playing (greybox fallback / art not loaded).
+   */
+  private pendingPunchImpact: { hitIndex: number | null; hitOtherHunter: boolean } | null = null;
 
   constructor() {
     super({ key: SceneKeys.Benchmark });
@@ -302,9 +345,13 @@ export class BenchmarkScene extends BaseScene {
     this.combatIntensity = 0;
     this.dangerAlpha = 0;
     this.impact = zeroImpact();
+    this.playerImpact = zeroImpact();
+    this.standInImpact = zeroImpact();
     this.recoilDir = ZERO;
+    this.standInRecoilDir = ZERO;
     this.shakeClock = 0;
     this.recoilHoundIndex = null;
+    this.pendingPunchImpact = null;
     this.attackQueued = false;
     // Reset the player-sprite transient state too, so a scene restart mid-punch
     // doesn't leave `playerPunching` stuck (freezing idle/run) or `playerPrev`
@@ -369,6 +416,8 @@ export class BenchmarkScene extends BaseScene {
     }
     const dt = clampDeltaSeconds(delta, BENCHMARK.movement.maxDeltaSeconds);
     this.impact = decayImpact(this.impact, dt, BENCHMARK.feel);
+    this.playerImpact = decayImpact(this.playerImpact, dt, BENCHMARK.feel);
+    this.standInImpact = decayImpact(this.standInImpact, dt, BENCHMARK.feel);
     this.shakeClock += dt;
 
     if (this.restartQueued) {
@@ -395,6 +444,7 @@ export class BenchmarkScene extends BaseScene {
     // pose, so the flash below fires exactly once per struck frame either way).
     if (this.sim.playerStruck) {
       this.showPlayerHitFlash();
+      this.registerPlayerHit();
     }
     if (this.sim.playerDefeatedThisFrame) {
       this.showRespawnFlash();
@@ -420,6 +470,7 @@ export class BenchmarkScene extends BaseScene {
     // oblique front faces (which live in the entity depth band).
     this.shadow.setDepth(DEPTH.entity + position.y - 1);
 
+    this.updateInvulnBlink();
     this.renderPlayer(position, facing);
 
     this.updatePrompt();
@@ -444,6 +495,9 @@ export class BenchmarkScene extends BaseScene {
       if (this.playerPunching) {
         return; // hold the punch pose; released by the animationcomplete handler
       }
+      if (isHitStopped(this.playerImpact)) {
+        return; // micro hit-stop: briefly hold the current frame on a take-hit
+      }
       if (moving && this.playerRunReady) {
         this.playerSprite.play(directionalFrameKey(PLAYER_RUN_BASE, facing), true);
         return;
@@ -463,6 +517,48 @@ export class BenchmarkScene extends BaseScene {
         -BODY_HEIGHT * 0.6 + tick.y * FACING_TICK_RADIUS,
       );
     }
+  }
+
+  /**
+   * Presentation-only take-hit weight for the player (`sim.playerStruck`, a
+   * ONE-FRAME pulse — GD-0007 combat feel): peaks `playerImpact`, which adds a
+   * light camera-shake (`updateCombatCamera`) and briefly holds the Hunter
+   * sprite's current frame (`renderPlayer`'s hit-stop check). Never moves the
+   * Hunter's logical position — the "recoil" here is camera shake only.
+   */
+  private registerPlayerHit(): void {
+    this.playerImpact = triggerImpact(this.playerImpact, BENCHMARK.feel);
+  }
+
+  /**
+   * Cheap periodic alpha flicker on the Hunter while `sim.playerInvulnerable`
+   * ("i-frames" — GD-0007 combat feel), so the invulnerability window reads;
+   * restored to full alpha the instant it ends. Driven off `shakeClock` (a
+   * free-running seconds clock, already reset on restart) rather than a new
+   * field.
+   */
+  private updateInvulnBlink(): void {
+    if (!this.sim.playerInvulnerable) {
+      this.hunter.setAlpha(1);
+      return;
+    }
+    const phase = Math.floor((this.shakeClock * 1000) / INVULN_BLINK_INTERVAL_MS) % 2;
+    this.hunter.setAlpha(phase === 0 ? 1 : INVULN_BLINK_ALPHA);
+  }
+
+  /**
+   * A restrained pulsing scale (1..1+`TELEGRAPH_SCALE_PEAK`) for an entity
+   * winding up an attack (`sim.houndWindingUp[i]`/`sim.standInWindingUp` —
+   * GD-0007 combat feel); exactly 1 (no-op) when not winding up. Never
+   * latched — recomputed every frame from the current pulse phase, shared by
+   * `renderHounds`/`renderStandIn`.
+   */
+  private telegraphScale(windingUp: boolean): number {
+    if (!windingUp) {
+      return 1;
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(this.shakeClock * TELEGRAPH_PULSE_FREQUENCY);
+    return 1 + TELEGRAPH_SCALE_PEAK * pulse;
   }
 
   /**
@@ -494,6 +590,19 @@ export class BenchmarkScene extends BaseScene {
       view.shadow.setPosition(state.position.x, state.position.y);
       view.shadow.setDepth(DEPTH.entity + state.position.y - 1); // grounded vs walls (Y-sort)
       view.flash?.setAlpha(isRecoiling ? this.impact.flash * 0.85 : 0);
+
+      // GD-0007 combat feel: a brief telegraph tell while this hound winds up
+      // a contact bite — a restrained scale pulse (+ tint on real art), never
+      // latched (recomputed every frame; exactly 1/cleared when not winding up).
+      const windingUp = this.sim.houndWindingUp[i] ?? false;
+      view.container.setScale(this.telegraphScale(windingUp));
+      if (view.sprite) {
+        if (windingUp) {
+          view.sprite.setTint(BENCHMARK.colors.telegraph);
+        } else {
+          view.sprite.clearTint();
+        }
+      }
 
       const holdForHitStop = isRecoiling && isHitStopped(this.impact);
       if (view.sprite && !holdForHitStop) {
@@ -561,18 +670,40 @@ export class BenchmarkScene extends BaseScene {
       return;
     }
     const { position, facing } = state;
-    this.standIn.container.setPosition(position.x, position.y);
+    // GD-0007 combat feel: the same recoil/flash/hit-stop idiom as a hound
+    // hit (`registerHit`), but on `standInImpact`/`standInRecoilDir` — the
+    // player's swing connected with the stand-in instead (`hitOtherHunter`),
+    // so PvP hits read like PvE hits.
+    const recoil = BENCHMARK.feel.recoilPeakPx * this.standInImpact.recoil;
+    this.standIn.container.setPosition(
+      position.x + this.standInRecoilDir.x * recoil,
+      position.y + this.standInRecoilDir.y * recoil,
+    );
     this.standIn.container.setDepth(DEPTH.entity + position.y); // pivot.y sorting
     this.standIn.shadow.setPosition(position.x, position.y);
     this.standIn.shadow.setDepth(DEPTH.entity + position.y - 1); // grounded vs walls (Y-sort)
+    this.standIn.flash?.setAlpha(this.standInImpact.flash * 0.85);
+
+    // GD-0007 combat feel: a brief telegraph tell while the stand-in winds up
+    // its punch — mirrors the hound's tell (see `renderHounds`).
+    const windingUp = this.sim.standInWindingUp;
+    this.standIn.container.setScale(this.telegraphScale(windingUp));
+    if (this.standIn.sprite) {
+      if (windingUp) {
+        this.standIn.sprite.setTint(BENCHMARK.colors.telegraph);
+      } else {
+        this.standIn.sprite.clearTint();
+      }
+    }
 
     const moving = this.standInPrev
       ? Math.hypot(position.x - this.standInPrev.x, position.y - this.standInPrev.y) > 0.05
       : false;
     this.standInPrev = position;
 
+    const holdForHitStop = isHitStopped(this.standInImpact);
     if (this.standIn.sprite) {
-      if (!this.standInPunching) {
+      if (!this.standInPunching && !holdForHitStop) {
         if (moving && this.standInRunReady) {
           this.standIn.sprite.play(directionalFrameKey(TEST_RUN_BASE, facing), true);
         } else {
@@ -646,7 +777,14 @@ export class BenchmarkScene extends BaseScene {
     const laScale = lerpScalar(1, cc.lookAheadCombatScale, this.combatIntensity);
     const target = lookAheadTarget(intent, BENCHMARK.camera.lookAheadDistance * laScale);
     this.lookAhead = smoothTowards(this.lookAhead, target, BENCHMARK.camera.lookAheadSmoothing, dt);
-    const shakeMag = BENCHMARK.feel.shakePeakPx * this.impact.shake;
+    // The player's own take-hit shake (`playerImpact`) is a separate, lighter
+    // envelope from a landed hit's shake (`impact`) — combine by peak, not sum,
+    // so simultaneous hits don't stack into an un-restrained shake.
+    const shakeIntensity = Math.max(
+      this.impact.shake,
+      this.playerImpact.shake * PLAYER_HIT_SHAKE_SCALE,
+    );
+    const shakeMag = BENCHMARK.feel.shakePeakPx * shakeIntensity;
     const shakeX = shakeMag * Math.sin(this.shakeClock * BENCHMARK.feel.shakeFrequency);
     const shakeY = shakeMag * Math.sin(this.shakeClock * BENCHMARK.feel.shakeFrequency * 1.3 + 1.7);
     this.cameras.main.setFollowOffset(-(this.lookAhead.x + shakeX), -(this.lookAhead.y + shakeY));
@@ -820,6 +958,29 @@ export class BenchmarkScene extends BaseScene {
           this.playerPunching = false;
         }
       });
+      // GD-0007 punch connect-sync: fire the swing's deferred visual impact
+      // (see `handleAttack`/`firePunchImpact`) the moment the punch animation
+      // reaches its connect frame, so the flash/shake/recoil sync to when the
+      // fist actually lands rather than to the Space keypress.
+      this.playerSprite.on(
+        Phaser.Animations.Events.ANIMATION_UPDATE,
+        (anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+          // Fire on the first frame AT OR PAST the connect frame: a large delta
+          // can make Phaser skip the exact connect frame, and a strict `===`
+          // would then drop this swing's impact. The `pendingPunchImpact` null
+          // below makes it fire exactly once per swing regardless.
+          if (
+            !this.pendingPunchImpact ||
+            !anim.key.startsWith(PLAYER_PUNCH_BASE) ||
+            frame.index < PUNCH_CONNECT_FRAME_INDEX
+          ) {
+            return;
+          }
+          const pending = this.pendingPunchImpact;
+          this.pendingPunchImpact = null;
+          this.firePunchImpact(pending.hitIndex, pending.hitOtherHunter);
+        },
+      );
       children = [this.playerSprite];
     } else {
       const body = this.add
@@ -1033,6 +1194,13 @@ export class BenchmarkScene extends BaseScene {
       .ellipse(position.x, position.y, footprintRadius * 2, footprintRadius, colors.footprint, 0.5)
       .setDepth(DEPTH.shadow);
 
+    // Envelope-driven hit flash (GD-0007), mirrors `createHoundView`'s `flash`:
+    // alpha set each frame in `renderStandIn` from `standInImpact`, shown when
+    // the player's swing connects with the stand-in instead of a hound.
+    const flash = this.add
+      .ellipse(0, -BODY_HEIGHT * 0.55, BODY_WIDTH * 1.15, BODY_HEIGHT * 0.9, colors.hitFlash, 1)
+      .setAlpha(0);
+
     let sprite: Phaser.GameObjects.Sprite | undefined;
     let facingTick: Phaser.GameObjects.Rectangle | undefined;
     let children: Phaser.GameObjects.GameObject[];
@@ -1047,7 +1215,7 @@ export class BenchmarkScene extends BaseScene {
           this.standInPunching = false;
         }
       });
-      children = [sprite];
+      children = [sprite, flash];
     } else {
       const body = this.add
         .rectangle(0, -BODY_HEIGHT / 2, BODY_WIDTH, BODY_HEIGHT, colors.otherHunter)
@@ -1059,7 +1227,7 @@ export class BenchmarkScene extends BaseScene {
         FACING_TICK_SIZE,
         colors.otherHunterFacing,
       );
-      children = [body, facingTick];
+      children = [body, facingTick, flash];
     }
 
     const container = this.add
@@ -1068,7 +1236,7 @@ export class BenchmarkScene extends BaseScene {
 
     const [hpBarBack, hpBarFill] = this.createHpBar(position.x, position.y - STANDIN_HP_BAR_OFFSET_Y);
 
-    this.standIn = { container, shadow, sprite, facingTick, hpBarBack, hpBarFill };
+    this.standIn = { container, shadow, sprite, facingTick, hpBarBack, hpBarFill, flash };
     this.createCombatMarker();
   }
 
@@ -1350,9 +1518,23 @@ export class BenchmarkScene extends BaseScene {
       return; // still on cooldown
     }
     this.showSwing();
-    this.startPlayerPunch();
-    if (result.hit) {
-      this.registerHit(result.hitIndex);
+    const punchStarted = this.startPlayerPunch();
+    if (result.hit || result.hitOtherHunter) {
+      if (punchStarted) {
+        // GD-0007 punch connect-sync: defer the visual impact (target flash +
+        // camera shake) to the punch animation's connect frame instead of
+        // firing it immediately — see the `animationupdate` listener in
+        // `createHunter`. The sim's damage timing is unaffected.
+        // Single-slot on purpose: the connect frame (~0.17s in) always fires
+        // before the next swing (attackCooldownSeconds 0.35s), so a pending
+        // impact is never overwritten. If the cooldown drops below the connect
+        // time, make this a queue so a hit's feedback isn't dropped.
+        this.pendingPunchImpact = { hitIndex: result.hitIndex, hitOtherHunter: result.hitOtherHunter };
+      } else {
+        // Greybox fallback / punch animation unavailable: no connect frame to
+        // sync to, so fire immediately as before.
+        this.firePunchImpact(result.hitIndex, result.hitOtherHunter);
+      }
     }
     if (result.repelled && result.hitIndex !== null) {
       // The finishing hit downs the hound (frozen, GD-0007); it only actually
@@ -1361,6 +1543,19 @@ export class BenchmarkScene extends BaseScene {
       // doesn't fight the downed-cue alpha dip over the downed duration.
       this.showDiscovery('The ruin hound is driven off — the pocket falls quiet.');
       this.log.info('Benchmark combat: ruin hound repelled (benchmark stub)');
+    }
+  }
+
+  /** Fires the connecting swing's visual impact on whichever target it hit —
+   * a hound (`registerHit`) or the stand-in (`registerStandInHit`) — never
+   * both (`AttackResult` reports at most one target). Called either
+   * immediately (greybox fallback) or deferred to the punch's connect frame
+   * (GD-0007 punch connect-sync, see `handleAttack`/`createHunter`). */
+  private firePunchImpact(hitIndex: number | null, hitOtherHunter: boolean): void {
+    if (hitOtherHunter) {
+      this.registerStandInHit();
+    } else {
+      this.registerHit(hitIndex);
     }
   }
 
@@ -1375,23 +1570,37 @@ export class BenchmarkScene extends BaseScene {
   }
 
   /**
+   * Presentation-only hit feedback for the stand-in "other player" Hunter
+   * (`result.hitOtherHunter`) — mirrors `registerHit`'s recoil/flash/hit-stop
+   * idiom on `standInImpact`/`standInRecoilDir` instead, so a PvP hit reads
+   * like a PvE hit. Never touches logical state (GD-0004).
+   */
+  private registerStandInHit(): void {
+    this.standInImpact = triggerImpact(this.standInImpact, BENCHMARK.feel);
+    this.standInRecoilDir = directionToVector(this.sim.hunter.facing);
+  }
+
+  /**
    * Starts the player's punch pose on a connecting/whiffed swing alike (any
    * `result.swung`), picking the nearest covered direction to the Hunter's
    * current facing. Held via `playerPunching` until `animationcomplete`
-   * releases it back to run/idle in `renderPlayer`. No-op for the greybox
-   * fallback or if the punch animation somehow isn't registered.
+   * releases it back to run/idle in `renderPlayer`. Returns whether the punch
+   * animation actually started (false for the greybox fallback or if the
+   * punch animation isn't registered) — `handleAttack` uses this to decide
+   * whether the connect-sync defer applies or the impact must fire immediately.
    */
-  private startPlayerPunch(): void {
+  private startPlayerPunch(): boolean {
     if (!this.playerSprite) {
-      return;
+      return false;
     }
     const dir = nearestCoveredDirection(this.sim.hunter.facing, PLAYER_PUNCH_DIRS);
     const key = directionalFrameKey(PLAYER_PUNCH_BASE, dir);
     if (!this.anims.exists(key)) {
-      return;
+      return false;
     }
     this.playerPunching = true;
     this.playerSprite.play(key, true);
+    return true;
   }
 
   /**
