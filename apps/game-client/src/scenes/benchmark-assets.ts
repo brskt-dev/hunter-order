@@ -67,9 +67,9 @@ function runFrames(): ArtFrame[] {
 
 // --- Hunter sprites (PLAYER = bruno-dentes, TEST = eduardo-careca) ---------
 // Both characters share the same body/{idle,run,punch}/<dir>/<nnn>.png layout
-// as the hound, but punch coverage is partial per the source art (see each
-// metadata.json): PLAYER has s/se/sw, TEST has s/se. Loaded entirely by glob
-// (idle included) since 2 characters x 3 poses is too many hand imports.
+// as the hound, with full 8-direction punch coverage (see each metadata.json).
+// Loaded entirely by glob (idle included) since 2 characters x 3 poses is too
+// many hand imports.
 
 /** Base key for the PLAYER (bruno-dentes) directional static idle. */
 export const PLAYER_IDLE_BASE = 'art-player-idle';
@@ -90,9 +90,9 @@ export const RUN_FRAME_COUNT = 4;
 export const PUNCH_FRAME_COUNT = 6;
 
 /** Directions with punch source art for the PLAYER Hunter. */
-export const PLAYER_PUNCH_DIRS: Direction8[] = ['s', 'se', 'sw'];
+export const PLAYER_PUNCH_DIRS: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 /** Directions with punch source art for the TEST Hunter. */
-export const TEST_PUNCH_DIRS: Direction8[] = ['s', 'se'];
+export const TEST_PUNCH_DIRS: Direction8[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 
 /** Builds a `(facing, frame) -> texture key` function for an animation base. */
 function frameKeyBuilder(base: string): (facing: Direction8, frame: number) => string {

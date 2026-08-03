@@ -18,9 +18,9 @@
     },
     "punch": {
       "frames": 6,
-      "directions": ["s", "se"],
+      "directions": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
       "path": "punch/<dir>/",
-      "note": "PixelLab template cross-punch; other directions (n, ne, e, nw, w, sw) failed to generate on the PixelLab trial due to heavy load — complete later."
+      "note": "PixelLab template cross-punch, all 8 directions."
     }
   },
   "source": {
